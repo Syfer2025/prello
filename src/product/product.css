@@ -33,8 +33,8 @@ html, body {
 
 /* ── Design Tokens Globais (LivingWriter teal default) ────── */
 :root {
-  --bg-dark: #020a10;
-  --bg-surface: #020a10;
+  --bg-dark: #1f262e;
+  --bg-surface: #1f262e;
   --bg-surface-elevated: #23252a;
   --border-color: #2c2e33;
   --border-color-active: #0d9488;
@@ -80,8 +80,8 @@ html, body {
 
 /* ── Canvas editor shell ───────────────────────────────────── */
 .canvas-editor-shell {
-  --bg-dark: #020a10;
-  --bg-surface: #020a10;
+  --bg-dark: #1f262e;
+  --bg-surface: #1f262e;
   --bg-surface-elevated: #262e37;
   --border-color: #333d47;
   --border-color-active: #0a84ff;
@@ -160,7 +160,7 @@ html, body {
 /* Faixa vertical de Ícones (Strip) */
 .canvas-editor-sidebar-strip {
   width: 44px;
-  background: #112132;
+  background: #2b343b;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -312,7 +312,7 @@ html, body {
 .canvas-editor-header {
   display: flex;
   flex-direction: column;
-  background: #020a10;
+  background: #1f262e;
   border-bottom: none;
 }
 
@@ -465,7 +465,7 @@ html, body {
   justify-content: flex-start;
   gap: 6px;
   padding: 5px 10px;
-  background: #020a10;
+  background: #1f262e;
   border-bottom: none;
   flex-wrap: wrap;
   min-height: 38px;
@@ -480,7 +480,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 2px;
-  background: #112132;
+  background: #2b343b;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   padding: 3px 6px;
@@ -605,7 +605,7 @@ html, body {
 
 /* Sidebar Cards - native capsule style */
 .canvas-sidebar-card {
-  background: #112132;
+  background: #2b343b;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   padding: 12px;
@@ -1397,8 +1397,8 @@ html, body {
 
 /* LivingWriter-inspired Default Theme */
 .canvas-editor-shell.theme-livingwriter {
-  --bg-dark: #020a10;
-  --bg-surface: #020a10;
+  --bg-dark: #1f262e;
+  --bg-surface: #1f262e;
   --bg-surface-elevated: #23252a;
   --border-color: #2c2e33;
   --border-color-active: #0d9488;
