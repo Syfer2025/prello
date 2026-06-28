@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readCanvasLayoutSnapshot } from './canvas-layout-snapshot';
-import type { CanvasDrawInternal } from './canvas-draw-access';
+import type { CanvasDrawInternal } from './canvas-draw-internal';
 
 /** Constrói um Draw falso com positionList/elementList paralelos. */
 function fakeDraw(

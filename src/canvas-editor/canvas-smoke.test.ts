@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { ElementType } from '@hufe921/canvas-editor';
+import { ElementType } from '../vendor/canvas-editor';
 import { PDFDocument } from 'pdf-lib';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,16 +49,18 @@ describe('canvas editor smoke', () => {
     );
     expect(appShellSource).not.toContain("from './EditorShell'");
     expect(appShellSource).not.toContain("from '../lab/MotorLab'");
-    expect(appShellSource).not.toContain("from '@hufe921/canvas-editor'");
-    expect(canvasShellSource).not.toContain("from '@hufe921/canvas-editor'");
-    expect(canvasShellSource).toContain('renderCanvasPrintPdf');
+    expect(appShellSource).not.toContain("from '../vendor/canvas-editor'");
+    expect(canvasShellSource).not.toContain("from '../vendor/canvas-editor'");
+    expect(canvasShellSource).toContain('renderCanvasPrintPdfFromPreparedPages');
     expect(canvasShellSource).toContain('canvasPixelRatioForPrintDpi');
+    expect(canvasShellSource).toContain('preparePageImageExport');
+    expect(canvasShellSource).toContain('getRenderedPageImage');
     expect(canvasShellSource).toContain('Total de Páginas');
     expect(canvasShellSource).toContain('Total de Palavras');
     expect(canvasShellSource).toContain('PDF');
     expect(canvasShellSource).toContain('Salvar');
     expect(canvasShellSource).toContain('Mostra duas paginas lado a lado');
-    expect(hostSource).toContain("from '@hufe921/canvas-editor'");
+    expect(hostSource).toContain("from '../vendor/canvas-editor'");
     expect(hostSource).toContain('EditorMode.PRINT');
     expect(hostSource).toContain('executePageBreak');
     expect(hostSource).toContain('executeSetPaperMargin');

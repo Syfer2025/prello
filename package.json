@@ -15,7 +15,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@hufe921/canvas-editor": "^0.9.136",
     "@pdf-lib/fontkit": "^1.1.1",
     "hyphenation.pt": "^0.2.1",
     "hypher": "^0.2.5",

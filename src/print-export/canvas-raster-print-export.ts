@@ -29,6 +29,30 @@ export interface CanvasPrintPdfResult {
   report: CanvasPrintExportReport;
 }
 
+export class CanvasPrintExportError extends Error {
+  readonly report: CanvasPrintExportReport;
+
+  constructor(message: string, report: CanvasPrintExportReport) {
+    super(message);
+    this.name = 'CanvasPrintExportError';
+    this.report = report;
+  }
+}
+
+export interface PreparedCanvasPageImageExport {
+  pageSize: CanvasPdfPageSize;
+  targetDpi?: number;
+  preparePageImages(pixelRatio: number): number | Promise<number>;
+  getRenderedPageImage(index: number): string | Promise<string>;
+  yieldToMain?: () => Promise<void>;
+}
+
+const RASTER_EXPORT_WARNINGS = [
+  'PDF rasterizado: texto e vetores saem como imagem.',
+  'Nao e PDF/X e nao contem OutputIntent ICC.',
+  'Nao converte RGB para CMYK.',
+];
+
 export function canvasPixelRatioForPrintDpi(targetDpi = DEFAULT_PRINT_DPI): number {
   if (!Number.isFinite(targetDpi) || targetDpi <= 0) {
     throw new RangeError('Target DPI must be a positive number');
@@ -67,11 +91,7 @@ export function preflightCanvasPrintExport(
   targetDpi = DEFAULT_PRINT_DPI
 ): CanvasPrintExportReport {
   const blockingIssues: string[] = [];
-  const warnings = [
-    'PDF rasterizado: texto e vetores saem como imagem.',
-    'Nao e PDF/X e nao contem OutputIntent ICC.',
-    'Nao converte RGB para CMYK.',
-  ];
+  const warnings = [...RASTER_EXPORT_WARNINGS];
 
   if (pageDataUrls.length === 0) {
     blockingIssues.push('Cannot export print PDF without page images.');
@@ -82,7 +102,9 @@ export function preflightCanvasPrintExport(
 
   const pageDpis = pageDataUrls.map((dataUrl, index) => {
     const dpi = effectiveRasterDpi(inspectPngDataUrl(dataUrl), pageSize);
-    if (dpi.effectiveDpi + 0.0001 < targetDpi) {
+    // Compara o DPI ARREDONDADO (igual ao exibido): A5 rende ~299,8 DPI por
+    // arredondamento sub-pixel da largura da página; isso É 300 DPI para impressão.
+    if (Math.round(dpi.effectiveDpi) < targetDpi) {
       blockingIssues.push(
         `Pagina ${index + 1} rasterizada a ${Math.round(dpi.effectiveDpi)} DPI efetivo; minimo exigido: ${targetDpi} DPI.`
       );
@@ -137,7 +159,7 @@ export function buildPrintExportPreflight(
   const rasterOk =
     report !== null &&
     report.pageCount > 0 &&
-    report.minEffectiveDpi + 0.0001 >= targetDpi;
+    Math.round(report.minEffectiveDpi) >= targetDpi;
 
   return [
     {
@@ -194,37 +216,129 @@ export async function renderCanvasPrintPdf(
 ): Promise<CanvasPrintPdfResult> {
   const report = preflightCanvasPrintExport(pageDataUrls, pageSize, targetDpi);
   if (report.blockingIssues.length > 0) {
-    throw new Error(report.blockingIssues[0]);
+    throw new CanvasPrintExportError(report.blockingIssues[0]!, report);
   }
 
-  const pdf = await PDFDocument.create();
-  pdf.setTitle('Prelo print raster export');
-  pdf.setCreator('Prelo');
-  pdf.setProducer('Prelo Canvas raster print export');
-  pdf.setSubject(`${targetDpi} DPI raster PDF`);
-  pdf.setKeywords(['Prelo', 'raster', `${targetDpi} DPI`]);
+  const pdf = await createRasterPdfDocument(targetDpi);
 
   const pageWidthPt = mmToPt(pageSize.widthMm);
   const pageHeightPt = mmToPt(pageSize.heightMm);
 
   for (const dataUrl of pageDataUrls) {
-    const image = await pdf.embedPng(dataUrlToBytes(dataUrl));
-    const page = pdf.addPage([pageWidthPt, pageHeightPt]);
-    page.setMediaBox(0, 0, pageWidthPt, pageHeightPt);
-    page.setTrimBox(0, 0, pageWidthPt, pageHeightPt);
-    page.setBleedBox(0, 0, pageWidthPt, pageHeightPt);
-    page.drawImage(image, {
-      x: 0,
-      y: 0,
-      width: pageWidthPt,
-      height: pageHeightPt,
-    });
+    await appendRasterPage(pdf, dataUrl, pageWidthPt, pageHeightPt);
   }
 
   return {
     bytes: await pdf.save({ useObjectStreams: false }),
     report,
   };
+}
+
+export async function renderCanvasPrintPdfFromPreparedPages({
+  pageSize,
+  targetDpi = DEFAULT_PRINT_DPI,
+  preparePageImages,
+  getRenderedPageImage,
+  yieldToMain = defaultYieldToMain,
+}: PreparedCanvasPageImageExport): Promise<CanvasPrintPdfResult> {
+  const pixelRatio = canvasPixelRatioForPrintDpi(targetDpi);
+  const pageCount = await preparePageImages(pixelRatio);
+  const blockingIssues: string[] = [];
+
+  if (pageCount <= 0) {
+    blockingIssues.push('Cannot export print PDF without page images.');
+  }
+  if (pageSize.widthMm <= 0 || pageSize.heightMm <= 0) {
+    blockingIssues.push('Page size must be positive.');
+  }
+
+  const pdf = await createRasterPdfDocument(targetDpi);
+  const pageWidthPt = mmToPt(pageSize.widthMm);
+  const pageHeightPt = mmToPt(pageSize.heightMm);
+  let minEffectiveDpi = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < pageCount; index += 1) {
+    const dataUrl = await getRenderedPageImage(index);
+    const dpi = effectiveRasterDpi(inspectPngDataUrl(dataUrl), pageSize);
+    minEffectiveDpi = Math.min(minEffectiveDpi, dpi.effectiveDpi);
+
+    // Compara o DPI ARREDONDADO (igual ao exibido): A5 rende ~299,8 DPI por
+    // arredondamento sub-pixel da largura da página; isso É 300 DPI para impressão.
+    if (Math.round(dpi.effectiveDpi) < targetDpi) {
+      blockingIssues.push(
+        `Pagina ${index + 1} rasterizada a ${Math.round(dpi.effectiveDpi)} DPI efetivo; minimo exigido: ${targetDpi} DPI.`
+      );
+    }
+
+    if (blockingIssues.length > 0) {
+      const report = buildRasterReport(targetDpi, pageCount, minEffectiveDpi, blockingIssues);
+      throw new CanvasPrintExportError(blockingIssues[0]!, report);
+    }
+
+    await appendRasterPage(pdf, dataUrl, pageWidthPt, pageHeightPt);
+    await yieldToMain();
+  }
+
+  const report = buildRasterReport(
+    targetDpi,
+    pageCount,
+    Number.isFinite(minEffectiveDpi) ? minEffectiveDpi : 0,
+    blockingIssues
+  );
+
+  return {
+    bytes: await pdf.save({ useObjectStreams: false }),
+    report,
+  };
+}
+
+async function createRasterPdfDocument(targetDpi: number): Promise<PDFDocument> {
+  const pdf = await PDFDocument.create();
+  pdf.setTitle('Prelo print raster export');
+  pdf.setCreator('Prelo');
+  pdf.setProducer('Prelo Canvas raster print export');
+  pdf.setSubject(`${targetDpi} DPI raster PDF`);
+  pdf.setKeywords(['Prelo', 'raster', `${targetDpi} DPI`]);
+  return pdf;
+}
+
+async function appendRasterPage(
+  pdf: PDFDocument,
+  dataUrl: string,
+  pageWidthPt: number,
+  pageHeightPt: number
+): Promise<void> {
+  const image = await pdf.embedPng(dataUrlToBytes(dataUrl));
+  const page = pdf.addPage([pageWidthPt, pageHeightPt]);
+  page.setMediaBox(0, 0, pageWidthPt, pageHeightPt);
+  page.setTrimBox(0, 0, pageWidthPt, pageHeightPt);
+  page.setBleedBox(0, 0, pageWidthPt, pageHeightPt);
+  page.drawImage(image, {
+    x: 0,
+    y: 0,
+    width: pageWidthPt,
+    height: pageHeightPt,
+  });
+}
+
+function buildRasterReport(
+  targetDpi: number,
+  pageCount: number,
+  minEffectiveDpi: number,
+  blockingIssues: string[]
+): CanvasPrintExportReport {
+  return {
+    targetDpi,
+    pageCount,
+    minEffectiveDpi,
+    blockingIssues: [...blockingIssues],
+    warnings: [...RASTER_EXPORT_WARNINGS],
+    isPrintReadyRaster: blockingIssues.length === 0,
+  };
+}
+
+function defaultYieldToMain(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function isPng(bytes: Uint8Array): boolean {

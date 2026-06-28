@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AUTO_HYPHEN_VALUE, stripAutoHyphens } from './canvas-hyphenation';
-import type { CanvasDrawInternal } from './canvas-draw-access';
+import type { CanvasDrawInternal } from './canvas-draw-internal';
 
 interface El {
   value: string;

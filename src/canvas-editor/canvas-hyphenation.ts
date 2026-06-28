@@ -15,11 +15,11 @@
  *    antes de salvar/buscar/copiar, e re-derivado por reflow.
  *
  * Tudo aqui é fail-safe: erro → o chamador limpa os hífens e desliga a feature.
- * Pinado em @hufe921/canvas-editor@0.9.136. Ver memória prelo-canvas-wysiwyg-serialization.
+ * Ver memória prelo-canvas-wysiwyg-serialization.
  */
 import Hypher from 'hypher';
 import pt from 'hyphenation.pt';
-import type { CanvasDrawInternal } from './canvas-draw-access';
+import type { CanvasDrawInternal } from './canvas-draw-internal';
 
 export const AUTO_HYPHEN_VALUE = '-';
 

@@ -5,7 +5,7 @@ import {
   type IEditorData,
   type IEditorOption,
   type IElement,
-} from '@hufe921/canvas-editor';
+} from '../vendor/canvas-editor';
 import {
   bookLayoutSettingsFromPreset,
   canvasMarginsFromBookLayout,

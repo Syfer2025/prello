@@ -6,7 +6,6 @@ import {
   TitleLevel,
   ListType,
   ListStyle,
-  EditorMode,
   type ICatalog,
 } from '../canvas-editor/CanvasEditorHost';
 import { CANVAS_STORAGE_KEY, loadCanvasProject, saveCanvasProject } from '../canvas-editor/canvas-persistence';
@@ -38,13 +37,11 @@ import {
 import {
   buildPrintExportPreflight,
   canvasPixelRatioForPrintDpi,
-  preflightCanvasPrintExport,
+  CanvasPrintExportError,
+  renderCanvasPrintPdfFromPreparedPages,
   type CanvasPrintExportReport,
   type PreflightStatus,
 } from '../print-export/canvas-raster-print-export';
-import { PDFDocument } from 'pdf-lib';
-import { dataUrlToBytes, type CanvasPdfPageSize } from '../canvas-editor/canvas-pdf-export';
-import { mmToPt } from '../canvas-editor/prelo-canvas-units';
 import { exportCanvasVectorPdfFromSnapshot } from '../print-export/canvas-vector-pdf-export';
 import {
   BOOK_FONT_FAMILIES,
@@ -140,6 +137,7 @@ const BoldIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0
 const ItalicIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="4" x2="10" y2="4"></line><line x1="14" y1="20" x2="5" y2="20"></line><line x1="15" y1="4" x2="9" y2="20"></line></svg>;
 const UnderlineIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4v6a6 6 0 0 0 12 0V4"></path><line x1="4" y1="20" x2="20" y2="20"></line></svg>;
 const StrikeoutIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 4h11.5a4.5 4.5 0 0 1 0 9H5"></path><path d="M7.5 13h11.5a4.5 4.5 0 0 1 0 9H5"></path><line x1="3" y1="12" x2="21" y2="12"></line></svg>;
+const HighlightIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 11-6 6v3h9l3-3"></path><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"></path></svg>;
 const SizeMinusIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path></svg>;
 const SizeAddIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"></path></svg>;
 const TableIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="12" y1="3" x2="12" y2="21"></line></svg>;
@@ -157,18 +155,8 @@ const SettingsIcon = () => <svg aria-hidden="true" width="14" height="14" viewBo
 const BugIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg>;
 const ExportIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>;
 const ChevronLeftIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>;
-const SidebarLeftIcon = () => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-    <line x1="9" y1="3" x2="9" y2="21"></line>
-  </svg>
-);
-const SidebarRightIcon = () => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-    <line x1="15" y1="3" x2="15" y2="21"></line>
-  </svg>
-);
+const UndoIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10a6 6 0 0 1 0 12h-1"></path></svg>;
+const RedoIcon = () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 14 5-5-5-5"></path><path d="M20 9H10a6 6 0 0 0 0 12h1"></path></svg>;
 
 
 const ALIGNMENTS: { value: RowFlex; label: string; tooltip: string; icon: React.ReactNode }[] = [
@@ -201,6 +189,30 @@ const ALIGNMENTS: { value: RowFlex; label: string; tooltip: string; icon: React.
     icon: <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="17" y2="18"></line></svg>
   },
 ];
+
+/** Acima disto, a exportação raster (300 DPI) avisa que pode travar o navegador. */
+const RASTER_EXPORT_PAGE_WARNING_THRESHOLD = 60;
+
+/** Limites do zoom do spread "lado a lado" (o editor ao vivo tem o seu próprio). */
+const SPREAD_ZOOM_MIN = 0.5;
+const SPREAD_ZOOM_MAX = 3;
+const SPREAD_ZOOM_STEP = 0.1;
+
+/** Uma página dentro de um spread, ou `null` para o slot vazio (esquerda da 1ª). */
+type SpreadSlot = { pageNo: number; img: string } | null;
+
+/** Organiza as imagens em spreads de livro aberto: 1 sozinha à direita, depois pares. */
+function buildSpreads(images: string[]): SpreadSlot[][] {
+  const slots: SpreadSlot[] = images.map((img, i) => ({ pageNo: i + 1, img }));
+  const first = slots[0];
+  if (!first) return [];
+  if (slots.length === 1) return [[first]];
+  const spreads: SpreadSlot[][] = [[null, first]];
+  for (let i = 1; i < slots.length; i += 2) {
+    spreads.push([slots[i] ?? null, slots[i + 1] ?? null]);
+  }
+  return spreads;
+}
 
 interface CanvasShellState {
   projectName: string;
@@ -253,7 +265,6 @@ interface CanvasEditorShellProps {
 
 export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEditorShellProps = {}) {
   const editorRef = useRef<CanvasEditorHandle | null>(null);
-  const editorRef2 = useRef<CanvasEditorHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [state, setState] = useState<CanvasShellState>(loadInitialCanvasShellState);
   const [pageCount, setPageCount] = useState(0);
@@ -266,6 +277,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   const [tableCols, setTableCols] = useState(3);
   const [watermarkText, setWatermarkText] = useState('');
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showLargeExportWarn, setShowLargeExportWarn] = useState(false);
 
   useEffect(() => {
     if (state.dirty) {
@@ -277,7 +289,14 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
     }
   }, [state.dirty]);
   const [wordCount, setWordCount] = useState(0);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  // Visualização "lado a lado" = pré-visualização SÓ LEITURA em spread (livro
+  // aberto). O canvas-editor posiciona cursor/seleção numa única coluna vertical;
+  // espalhar as páginas em colunas com CSS quebrava todo o clique/cursor. Aqui
+  // mostramos imagens das páginas renderizadas — sem edição, sem bug de coordenada.
   const [pairView, setPairView] = useState(false);
+  const [spreadImages, setSpreadImages] = useState<string[] | null>(null);
+  const [spreadLoading, setSpreadLoading] = useState(false);
   
   const [selectedFont, setSelectedFont] = useState(DEFAULT_BOOK_FONT_FAMILY);
   const [selectedList, setSelectedList] = useState('');
@@ -301,40 +320,27 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   const [firstLineIndentActive, setFirstLineIndentActive] = useState(false);
 
   const [catalog, setCatalog] = useState<ICatalog | null>(null);
-  const [simpleMode, setSimpleMode] = useState(false);
 
-  const [showLeftSidebar, setShowLeftSidebar] = useState(() => {
-    return localStorage.getItem('prelo-show-left-sidebar') !== 'false';
-  });
-  const [showRightSidebar, setShowRightSidebar] = useState(() => {
-    return localStorage.getItem('prelo-show-right-sidebar') !== 'false';
-  });
-  
   type RightTab = 'page' | 'margins' | 'search' | 'watermark' | 'export' | 'stats';
-  const [activeRightTab, setActiveRightTab] = useState<RightTab>('page');
+  const [activeRightTab, setActiveRightTab] = useState<RightTab | null>('page');
   
   const handleRightTabClick = (tab: RightTab) => {
-    setActiveRightTab(tab);
-    if (!showRightSidebar) setShowRightSidebar(true);
+    setActiveRightTab(current => current === tab ? null : tab);
   };
 
   type LeftTab = 'chapters' | 'pages';
-  const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('chapters');
+  const [activeLeftTab, setActiveLeftTab] = useState<LeftTab | null>('chapters');
 
   const handleLeftTabClick = (tab: LeftTab) => {
-    setActiveLeftTab(tab);
-    if (!showLeftSidebar) setShowLeftSidebar(true);
+    setActiveLeftTab(current => current === tab ? null : tab);
   };
 
-  const handleJumpToPage = (pageNum: number) => {
-    const pageContainer = document.querySelector('.ce-page-container');
-    if (!pageContainer) return;
-    const canvases = pageContainer.querySelectorAll('canvas');
-    const targetCanvas = pageNum > 0 ? canvases[pageNum - 1] : undefined;
-    if (targetCanvas) {
-      targetCanvas.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
+  // Handler direto (referência estável em onClick) — lê a página do data-attr.
+  // Evita ler o ref dentro do .map (o que o react-hooks/refs sinaliza como render).
+  function handlePageNavClick(event: React.MouseEvent<HTMLButtonElement>) {
+    const pageNum = Number(event.currentTarget.dataset.page);
+    if (pageNum > 0) editorRef.current?.scrollToPage(pageNum);
+  }
 
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
 
@@ -344,14 +350,6 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, []);
-  useEffect(() => {
-    localStorage.setItem('prelo-show-left-sidebar', showLeftSidebar ? 'true' : 'false');
-  }, [showLeftSidebar]);
-
-  useEffect(() => {
-    localStorage.setItem('prelo-show-right-sidebar', showRightSidebar ? 'true' : 'false');
-  }, [showRightSidebar]);
-
   function handleFirstLineIndentMm(mm: number) {
     const clamped = Math.max(0, Math.min(40, Math.round(mm)));
     setFirstLineIndentMm(clamped);
@@ -365,17 +363,17 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
     });
   }
 
-  // Busca o catálogo (capítulos/seções) do editor — para assim que encontrar
+  // Carrega o catálogo (capítulos/seções) UMA vez quando o editor fica pronto —
+  // sem polling. Edições posteriores são cobertas pelo refresh por mudança abaixo.
   useEffect(() => {
-    const interval = setInterval(async () => {
-      const cat = await editorRef.current?.getCatalog();
-      if (cat && cat.length > 0) {
-        setCatalog(cat);
-        clearInterval(interval);
-      }
-    }, 500);
-    return () => clearInterval(interval);
-  }, []);
+    if (!editorReady) return;
+    let cancelled = false;
+    editorRef.current
+      ?.getCatalog()
+      .then((cat) => { if (!cancelled && cat) setCatalog(cat); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [editorReady]);
 
   // Atualiza catálogo quando o documento é modificado
   const catalogRefreshRef = useRef(false);
@@ -494,10 +492,6 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
     () => ({ ...state.document.options, letterClass: PT_LETTER_CLASS }),
     [state.document.options]
   );
-  const reviewOptions = useMemo(
-    () => ({ ...options, mode: EditorMode.READONLY }),
-    [options]
-  );
   const hasInexactPreview = hasInexactMirroredMarginPreview(state.bookLayout);
   const preflightChecks = useMemo(() => buildPrintExportPreflight(printReport), [printReport]);
 
@@ -505,10 +499,25 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
     editorRef.current?.getWordCount().then(setWordCount).catch(() => {});
   }, []);
 
+  // Contar palavras serializa o documento INTEIRO para um worker (postMessage
+  // clona tudo). Fazer isso a cada tecla trava livros grandes (~300 páginas).
+  // Só recontamos ~600ms depois que a digitação para.
+  const wordCountTimerRef = useRef<number | null>(null);
+  const scheduleWordCount = useCallback(() => {
+    if (wordCountTimerRef.current !== null) window.clearTimeout(wordCountTimerRef.current);
+    wordCountTimerRef.current = window.setTimeout(() => {
+      wordCountTimerRef.current = null;
+      refreshWordCount();
+    }, 600);
+  }, [refreshWordCount]);
+  useEffect(() => () => {
+    if (wordCountTimerRef.current !== null) window.clearTimeout(wordCountTimerRef.current);
+  }, []);
+
   const handleChange = useCallback(() => {
     setState((current) => (current.dirty ? current : { ...current, dirty: true }));
-    refreshWordCount();
-  }, [refreshWordCount]);
+    scheduleWordCount();
+  }, [scheduleWordCount]);
 
   const handleEditorReady = useCallback(() => {
     setEditorReady(true);
@@ -517,6 +526,10 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
 
   const handlePageCountChange = useCallback((nextPageCount: number) => {
     setPageCount(nextPageCount);
+  }, []);
+
+  const handlePageScaleChange = useCallback((scale: number) => {
+    setZoomLevel(scale);
   }, []);
 
   function handleProjectNameChange(value: string) {
@@ -597,7 +610,25 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   function handleSizeAdd() { editorRef.current?.sizeAdd(); setState((c) => ({ ...c, dirty: true })); }
   function handleSizeMinus() { editorRef.current?.sizeMinus(); setState((c) => ({ ...c, dirty: true })); }
 
-  function handleZoomReset() { editorRef.current?.zoomReset(); }
+  // Zoom: depois de cada comando, lê a escala real do editor e atualiza o rótulo.
+  const syncZoomLevel = useCallback(() => {
+    const scale = editorRef.current?.getPageScale();
+    if (typeof scale === 'number') setZoomLevel(scale);
+  }, []);
+  // No "lado a lado" o editor ao vivo está escondido — o zoom escala o spread
+  // (via --spread-zoom). Fora dele, o zoom é o do próprio canvas-editor.
+  function handleZoomIn() {
+    if (pairView) setZoomLevel((z) => Math.min(SPREAD_ZOOM_MAX, +(z + SPREAD_ZOOM_STEP).toFixed(2)));
+    else { editorRef.current?.zoomIn(); syncZoomLevel(); }
+  }
+  function handleZoomOut() {
+    if (pairView) setZoomLevel((z) => Math.max(SPREAD_ZOOM_MIN, +(z - SPREAD_ZOOM_STEP).toFixed(2)));
+    else { editorRef.current?.zoomOut(); syncZoomLevel(); }
+  }
+  function handleZoomReset() {
+    if (pairView) setZoomLevel(1);
+    else { editorRef.current?.zoomReset(); syncZoomLevel(); }
+  }
 
   function handleSetFontFamily(font: string) {
     setSelectedFont(font);
@@ -628,6 +659,11 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
     setState((current) => ({ ...current, dirty: true }));
   }
 
+  function handleHighlight(value: string | null) {
+    editorRef.current?.setHighlight(value);
+    setState((current) => ({ ...current, dirty: true }));
+  }
+
   function handleList(val: string) {
     setSelectedList(val);
     if (!val) {
@@ -640,6 +676,24 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   }
 
   function handleFormatPainter() { editorRef.current?.formatPainter(); }
+
+  function handleUndo() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.undo();
+    setPageCount(editor.getPageCount());
+    setState((current) => ({ ...current, dirty: true }));
+    window.setTimeout(refreshWordCount, 0);
+  }
+
+  function handleRedo() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.redo();
+    setPageCount(editor.getPageCount());
+    setState((current) => ({ ...current, dirty: true }));
+    window.setTimeout(refreshWordCount, 0);
+  }
 
   function handleInsertTable() { editorRef.current?.insertTable(tableRows, tableCols); setState((c) => ({ ...c, dirty: true })); }
 
@@ -683,63 +737,108 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
 
   async function handlePrint() { try { await editorRef.current?.print(); } catch (e) { console.error(e); } }
 
-  function handleTogglePairView() { setPairView((v) => !v); }
+  // Agrupa as páginas como um livro aberto: a 1ª (capa/recto) fica sozinha à
+  // direita; depois pares verso/recto — [2,3], [4,5]... A célula `null` é o slot
+  // vazio que mantém as ímpares sempre à direita.
+  const spreads = useMemo(() => buildSpreads(spreadImages ?? []), [spreadImages]);
 
-  async function handleExportPdf() {
+  // Identifica a geração de imagens em curso: se o usuário fechar o spread no meio,
+  // a geração antiga é descartada em vez de sobrescrever o estado.
+  const spreadGenIdRef = useRef(0);
+
+  // Página a rolar quando o spread fechar (clicada no spread). Em ref para não
+  // disparar setState dentro do efeito; o efeito limpa lendo/zerando o ref.
+  const pendingJumpPageRef = useRef<number | null>(null);
+
+  // Determinístico: assim que o spread fecha (pairView=false), este efeito roda
+  // APÓS o commit do React (overlay já desmontado) e rola até a página pedida —
+  // sem o antigo setTimeout de "chute" de 60ms.
+  useEffect(() => {
+    if (pairView) return;
+    const target = pendingJumpPageRef.current;
+    if (target === null) return;
+    pendingJumpPageRef.current = null;
+    editorRef.current?.scrollToPage(target);
+  }, [pairView]);
+
+  // Abre o "lado a lado" e gera as imagens das páginas. getPageImages renderiza em
+  // modo PRINT e restaura o pixel ratio/modo do editor ao vivo no fim.
+  function openPairView() {
+    const genId = ++spreadGenIdRef.current;
+    setPairView(true);
+    setZoomLevel(1); // o spread começa ajustado (100%); o zoom passa a escalá-lo
+    setSpreadImages(null);
+    setSpreadLoading(true);
+    void (async () => {
+      try {
+        const images = await editorRef.current?.getPageImages(2);
+        if (spreadGenIdRef.current === genId) setSpreadImages(images ?? []);
+      } catch (error) {
+        console.error('Falha ao gerar pré-visualização lado a lado:', error);
+        if (spreadGenIdRef.current === genId) setSpreadImages([]);
+      } finally {
+        if (spreadGenIdRef.current === genId) setSpreadLoading(false);
+      }
+    })();
+  }
+
+  function closePairView() {
+    spreadGenIdRef.current++; // invalida qualquer geração em voo
+    setPairView(false);
+    setSpreadImages(null);
+    setSpreadLoading(false);
+    syncZoomLevel(); // rótulo volta a refletir a escala real do editor ao vivo
+  }
+
+  function handleTogglePairView() {
+    if (pairView) closePairView();
+    else openPairView();
+  }
+
+  // Sai do spread e leva o editor até a página clicada (volta a poder editar).
+  function handleOpenPageFromSpread(pageNo: number) {
+    pendingJumpPageRef.current = pageNo;
+    closePairView(); // o efeito acima rola até a página após o overlay desmontar
+  }
+
+  function handleExportPdf() {
+    if (!editorRef.current) return;
+    // O raster re-renderiza TODAS as páginas em alta resolução (300 DPI) de uma
+    // vez: ~17 MB por página A5. Em livros grandes isso estoura a memória e trava
+    // o navegador. Avisamos (modal) e indicamos o vetorial (offset), que não rasteriza.
+    if (pageCount > RASTER_EXPORT_PAGE_WARNING_THRESHOLD) {
+      setShowLargeExportWarn(true);
+      return;
+    }
+    void runRasterExport();
+  }
+
+  async function runRasterExport() {
+    const editor = editorRef.current;
+    if (!editor) return;
     setExportStatus('generating');
     try {
-      const editor = editorRef.current;
-      if (!editor) throw new Error('Editor não está pronto');
-      const pixelRatio = canvasPixelRatioForPrintDpi();
-      const pageCount = editor.getPageCount();
-      if (pageCount === 0) throw new Error('Nenhuma página para exportar');
+      const targetDpi = Math.round(canvasPixelRatioForPrintDpi() * 96);
 
-      // Preflight rápido com a 1ª página para validar DPI
-      const firstDataUrl = await editor.getPageImage(0, pixelRatio);
-      const sampleReport = preflightCanvasPrintExport([firstDataUrl], state.bookLayout);
-      setPrintReport(sampleReport);
-      if (!sampleReport.isPrintReadyRaster) {
-        console.warn('Preflight bloqueou a exportacao:', sampleReport.blockingIssues);
-        setExportStatus('error');
-        return;
-      }
-
-      // Constrói o PDF página por página para evitar estouro de memória
-      const pdf = await PDFDocument.create();
-      pdf.setTitle('Prelo print raster export');
-      pdf.setCreator('Prelo');
-      pdf.setProducer('Prelo Canvas raster print export');
-      pdf.setSubject(`${Math.round(pixelRatio * 96)} DPI raster PDF`);
-
-      const pageWidthPt = mmToPt(state.bookLayout.widthMm);
-      const pageHeightPt = mmToPt(state.bookLayout.heightMm);
-
-      for (let i = 0; i < pageCount; i++) {
-        // Yield à UI a cada 10 páginas para não travar
-        if (i > 0 && i % 10 === 0) {
-          await new Promise((r) => setTimeout(r, 0));
-        }
-        const dataUrl = await editor.getPageImage(i, pixelRatio);
-        const image = await pdf.embedPng(dataUrlToBytes(dataUrl));
-        const page = pdf.addPage([pageWidthPt, pageHeightPt]);
-        page.setMediaBox(0, 0, pageWidthPt, pageHeightPt);
-        page.setTrimBox(0, 0, pageWidthPt, pageHeightPt);
-        page.setBleedBox(0, 0, pageWidthPt, pageHeightPt);
-        page.drawImage(image, {
-          x: 0,
-          y: 0,
-          width: pageWidthPt,
-          height: pageHeightPt,
-        });
-      }
-
-      const bytes = await pdf.save({ useObjectStreams: false });
-      console.info(`PDF raster exportado: ${pageCount} página(s)`);
+      const { bytes, report } = await renderCanvasPrintPdfFromPreparedPages({
+        pageSize: state.bookLayout,
+        targetDpi,
+        preparePageImages: (pixelRatio) => editor.preparePageImageExport(pixelRatio),
+        getRenderedPageImage: (index) => editor.getRenderedPageImage(index),
+      });
+      setPrintReport(report);
+      console.info(`PDF raster exportado: ${report.pageCount} página(s)`);
       downloadBytes(`${state.projectName || 'livro'}.pdf`, bytes, 'application/pdf');
       setExportStatus('ready');
     } catch (error) {
+      if (error instanceof CanvasPrintExportError) {
+        setPrintReport(error.report);
+      }
       console.error('Erro ao exportar PDF Canvas:', error);
       setExportStatus('error');
+    } finally {
+      // Libera as canvases gigantes de 300 DPI e volta o editor à resolução de tela.
+      editor.restoreAfterImageExport();
     }
   }
 
@@ -813,7 +912,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   }
 
   return (
-    <section className={`canvas-editor-shell theme-${editorTheme} accent-${editorAccent}${simpleMode ? ' simple-mode' : ''}`}>
+    <section className={`canvas-editor-shell theme-${editorTheme} accent-${editorAccent}`}>
       {/* ── Top Header ── */}
       <header className="canvas-editor-header">
         {/* Row 1: Logo/Back + Title + Status | Right actions */}
@@ -838,22 +937,6 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
           </div>
 
           <div className="canvas-header-right">
-            <div className="canvas-mode-toggle">
-              <button
-                type="button"
-                className={`canvas-mode-toggle-btn ${!simpleMode ? 'active' : ''}`}
-                onClick={() => setSimpleMode(false)}
-              >
-                Completo
-              </button>
-              <button
-                type="button"
-                className={`canvas-mode-toggle-btn ${simpleMode ? 'active' : ''}`}
-                onClick={() => setSimpleMode(true)}
-              >
-                Simples
-              </button>
-            </div>
             <button
               type="button"
               className={`btn-view-mode ${pairView ? 'active' : ''}`}
@@ -904,7 +987,17 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
       {/* ── Formatting Toolbar ── */}
       <div className="canvas-editor-toolbar-row" style={{ padding: '8px 16px' }}>
         <div className="canvas-editor-capsule" style={{ flex: 1, width: '100%', justifyContent: 'flex-start', flexWrap: 'wrap', gap: '8px', padding: '6px 12px' }}>
-          
+
+          <div className="canvas-editor-btn-group essential-toolbar-group">
+            <button type="button" className="tb-icon-btn" onClick={handleUndo} data-tooltip={TOOLTIPS.undo} aria-label="Desfazer">
+              <UndoIcon />
+            </button>
+            <button type="button" className="tb-icon-btn" onClick={handleRedo} data-tooltip={TOOLTIPS.redo} aria-label="Refazer">
+              <RedoIcon />
+            </button>
+          </div>
+          <div className="canvas-toolbar-group-divider" />
+
           {/* 1. Paragraph Style (Texto Normal / Capítulo / etc.) */}
           <div className="canvas-editor-btn-group essential-toolbar-group">
             <div className="canvas-dropdown-wrapper">
@@ -972,7 +1065,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
             <button type="button" className="tb-icon-btn" onClick={handleToggleItalic} data-tooltip={TOOLTIPS.italic} aria-label={TOOLTIPS.italic}><ItalicIcon /></button>
             <button type="button" className="tb-icon-btn" onClick={handleUnderline} data-tooltip={TOOLTIPS.underline} aria-label={TOOLTIPS.underline}><UnderlineIcon /></button>
             <div className="canvas-dropdown-wrapper">
-              <button type="button" className="tb-icon-btn" style={{ position: 'relative' }} data-tooltip={TOOLTIPS.color} aria-label={TOOLTIPS.color} onClick={() => setActiveDropdown(activeDropdown === 'global-color' ? null : 'global-color')}>
+              <button type="button" className="tb-icon-btn" style={{ position: 'relative' }} data-tooltip={activeDropdown === 'global-color' ? undefined : TOOLTIPS.color} aria-label={TOOLTIPS.color} onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === 'global-color' ? null : 'global-color'); }}>
                 <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: 'conic-gradient(#ef4444, #eab308, #22c55e, #3b82f6, #ec4899, #ef4444)', border: '1px solid rgba(255,255,255,0.2)' }} />
               </button>
               {activeDropdown === 'global-color' && (
@@ -985,14 +1078,47 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
                         className="canvas-color-swatch"
                         aria-label={`Aplicar cor ${c}`}
                         style={{ background: c }}
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          handleColor(c); 
-                          setActiveDropdown(null); 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleColor(c);
+                          setActiveDropdown(null);
                         }}
                       />
                     ))}
                   </div>
+                </div>
+              )}
+            </div>
+            <div className="canvas-dropdown-wrapper">
+              <button type="button" className="tb-icon-btn" style={{ position: 'relative' }} data-tooltip={activeDropdown === 'global-highlight' ? undefined : TOOLTIPS.highlight} aria-label={TOOLTIPS.highlight} onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === 'global-highlight' ? null : 'global-highlight'); }}>
+                <HighlightIcon />
+              </button>
+              {activeDropdown === 'global-highlight' && (
+                <div className="canvas-dropdown-menu" style={{ minWidth: '130px', zIndex: 1000, padding: '8px', top: '100%', left: '0' }} onClick={(e) => e.stopPropagation()}>
+                  <div className="canvas-color-grid">
+                    {CURATED_COLORS.map(c => (
+                      <button
+                        type="button"
+                        key={c}
+                        className="canvas-color-swatch"
+                        aria-label={`Realçar com ${c}`}
+                        style={{ background: c }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleHighlight(c);
+                          setActiveDropdown(null);
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="canvas-dropdown-item"
+                    style={{ marginTop: '6px', justifyContent: 'center' }}
+                    onClick={(e) => { e.stopPropagation(); handleHighlight(null); setActiveDropdown(null); }}
+                  >
+                    Remover realce
+                  </button>
                 </div>
               )}
             </div>
@@ -1050,9 +1176,26 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
 
           {/* 8. View & Zoom (pushed to right) */}
           <div className="canvas-editor-btn-group" style={{ marginLeft: 'auto' }}>
-            <span className="canvas-editor-zoom-label" style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', cursor: 'pointer' }} onClick={handleZoomReset}>100%</span>
+            <button type="button" className="tb-icon-btn small" onClick={handleZoomOut} data-tooltip={TOOLTIPS.zoomOut} aria-label={TOOLTIPS.zoomOut}>
+              <SizeMinusIcon />
+            </button>
+            <span
+              className="canvas-editor-zoom-label"
+              style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', cursor: 'pointer', minWidth: 38, textAlign: 'center' }}
+              onClick={handleZoomReset}
+              data-tooltip={TOOLTIPS.zoomReset}
+              role="button"
+              aria-label={TOOLTIPS.zoomReset}
+            >
+              {Math.round(zoomLevel * 100)}%
+            </span>
+            <button type="button" className="tb-icon-btn small" onClick={handleZoomIn} data-tooltip={TOOLTIPS.zoomIn} aria-label={TOOLTIPS.zoomIn}>
+              <SizeAddIcon />
+            </button>
             <div className="canvas-toolbar-group-divider" style={{ margin: '0 12px' }} />
-            <span className="canvas-editor-word-count" style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>0/25.000 palavras</span>
+            <span className="canvas-editor-word-count" style={{ fontSize: '12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+              {wordCount.toLocaleString('pt-BR')} palavras
+            </span>
           </div>
 
         </div>
@@ -1061,27 +1204,12 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
       {/* ── Body Layout ── */}
       <div className="canvas-editor-body">
         {/* ── Left Sidebar (Icon Strip + Expandable Drawer) ── */}
-        <aside className={`canvas-editor-left-sidebar-container ${!showLeftSidebar ? 'drawer-collapsed' : ''}`}>
+        <aside className={`canvas-editor-left-sidebar-container ${!activeLeftTab ? 'drawer-collapsed' : ''}`}>
           {/* Always visible Far-Left Icon Strip */}
           <div className="canvas-editor-sidebar-strip left-strip">
             <button
               type="button"
-              className={`sidebar-strip-btn toggle-btn ${showLeftSidebar ? 'active' : ''}`}
-              onClick={() => {
-                if (showLeftSidebar) {
-                  setShowLeftSidebar(false);
-                } else {
-                  setShowLeftSidebar(true);
-                }
-              }}
-              data-tooltip={showLeftSidebar ? 'Recolher painel' : 'Expandir painel'}
-              aria-label={showLeftSidebar ? 'Recolher painel esquerdo' : 'Expandir painel esquerdo'}
-            >
-              <SidebarLeftIcon />
-            </button>
-            <button
-              type="button"
-              className={`sidebar-strip-btn ${showLeftSidebar && activeLeftTab === 'chapters' ? 'active' : ''}`}
+              className={`sidebar-strip-btn ${activeLeftTab === 'chapters' ? 'active' : ''}`}
               onClick={() => handleLeftTabClick('chapters')}
               data-tooltip="Capítulos outline"
               aria-label="Abrir capítulos"
@@ -1090,7 +1218,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
             </button>
             <button
               type="button"
-              className={`sidebar-strip-btn ${showLeftSidebar && activeLeftTab === 'pages' ? 'active' : ''}`}
+              className={`sidebar-strip-btn ${activeLeftTab === 'pages' ? 'active' : ''}`}
               onClick={() => handleLeftTabClick('pages')}
               data-tooltip="Ir para a página"
               aria-label="Abrir navegação de páginas"
@@ -1109,7 +1237,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
           </div>
 
           {/* Left Drawer (collapsible) */}
-          <div className={`canvas-editor-sidebar-drawer left-drawer ${!showLeftSidebar ? 'collapsed' : ''}`} aria-hidden={!showLeftSidebar}>
+          <div className={`canvas-editor-sidebar-drawer left-drawer ${!activeLeftTab ? 'collapsed' : ''}`} aria-hidden={!activeLeftTab}>
             <div className="canvas-sidebar-drawer-content" style={{ width: '100%', display: 'flex', flexDirection: 'column', height: '100%', gap: '8px' }}>
               
               {activeLeftTab === 'chapters' && (
@@ -1149,7 +1277,8 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
                           width: '100%',
                           textAlign: 'left'
                         }}
-                        onClick={() => handleJumpToPage(pageNum)}
+                        data-page={pageNum}
+                        onClick={handlePageNavClick}
                         data-tooltip={`Ir para página ${pageNum}`}
                       >
                         <span style={{ fontSize: '12px', color: 'var(--text-primary)', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`Ir para página ${pageNum}`}>
@@ -1178,57 +1307,69 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
               <span>Preparando editor...</span>
             </div>
           )}
-          {/* Pages area */}
-          {pairView ? (
-            <div className="canvas-editor-pair-stage">
-              <div className="ce-pair-pane">
-                <CanvasEditorHost
-                  ref={editorRef}
-                  data={data}
-                  options={options}
-                  onChange={handleChange}
-                  onReady={handleEditorReady}
-                  onPageCountChange={handlePageCountChange}
-                  enableAutoHyphenation
-                  firstLineIndentMm={firstLineIndentMm}
-                  firstLineIndentAuto={firstLineIndentAuto}
-                  onFirstLineIndentActiveChange={setFirstLineIndentActive}
-                />
-              </div>
-              <div className="ce-pair-divider" />
-              <div className="ce-pair-pane">
-                <CanvasEditorHost
-                  ref={editorRef2}
-                  data={data}
-                  options={reviewOptions}
-                  enableAutoHyphenation
-                  firstLineIndentMm={firstLineIndentMm}
-                  firstLineIndentAuto={firstLineIndentAuto}
-                />
-              </div>
+          {/* Pages area — o editor ao vivo fica sempre montado (estado preservado).
+              No "lado a lado" cobrimos com o spread só leitura por cima. */}
+          <main className="canvas-editor-stage">
+            <CanvasEditorHost
+              ref={editorRef}
+              data={data}
+              options={options}
+              onChange={handleChange}
+              onReady={handleEditorReady}
+              onPageCountChange={handlePageCountChange}
+              enableAutoHyphenation
+              firstLineIndentMm={firstLineIndentMm}
+              firstLineIndentAuto={firstLineIndentAuto}
+              onFirstLineIndentActiveChange={setFirstLineIndentActive}
+              onPageScaleChange={handlePageScaleChange}
+            />
+          </main>
+
+          {/* ── Spread só leitura (visualização "lado a lado") ── */}
+          {pairView && (
+            <div className="canvas-spread-overlay" role="region" aria-label="Pré-visualização das páginas lado a lado" style={{ '--spread-zoom': zoomLevel } as React.CSSProperties}>
+              {spreadLoading ? (
+                <div className="canvas-spread-message">
+                  <div className="canvas-editor-loading-spinner" />
+                  <span>Gerando pré-visualização...</span>
+                </div>
+              ) : spreads.length === 0 ? (
+                <div className="canvas-spread-message">
+                  <span>Nada para visualizar ainda.</span>
+                </div>
+              ) : (
+                <div className="canvas-spread-scroll">
+                  {spreads.map((spread, spreadIndex) => (
+                    <div className="canvas-spread-row" key={spreadIndex}>
+                      {spread.map((slot, slotIndex) =>
+                        slot ? (
+                          <button
+                            type="button"
+                            key={slot.pageNo}
+                            className="canvas-spread-page"
+                            onClick={() => handleOpenPageFromSpread(slot.pageNo)}
+                            title={`Editar página ${slot.pageNo}`}
+                            aria-label={`Editar página ${slot.pageNo}`}
+                          >
+                            <img src={slot.img} alt={`Página ${slot.pageNo}`} draggable={false} />
+                            <span className="canvas-spread-page-num">{slot.pageNo}</span>
+                          </button>
+                        ) : (
+                          <div className="canvas-spread-page-empty" key={`empty-${slotIndex}`} aria-hidden="true" />
+                        )
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ) : (
-            <main className="canvas-editor-stage">
-              <CanvasEditorHost
-                ref={editorRef}
-                data={data}
-                options={options}
-                onChange={handleChange}
-                onReady={handleEditorReady}
-                onPageCountChange={handlePageCountChange}
-                enableAutoHyphenation
-                firstLineIndentMm={firstLineIndentMm}
-                firstLineIndentAuto={firstLineIndentAuto}
-                onFirstLineIndentActiveChange={setFirstLineIndentActive}
-              />
-            </main>
           )}
         </div>
 
         {/* ── Right Sidebar (Expandable Drawer + Icon Strip) ── */}
-        <aside className={`canvas-editor-right-sidebar-container ${!showRightSidebar ? 'drawer-collapsed' : ''}`}>
+        <aside className={`canvas-editor-right-sidebar-container ${!activeRightTab ? 'drawer-collapsed' : ''}`}>
           {/* Right Drawer (collapsible) */}
-          <div className={`canvas-editor-sidebar-drawer right-drawer ${!showRightSidebar ? 'collapsed' : ''}`} aria-hidden={!showRightSidebar}>
+          <div className={`canvas-editor-sidebar-drawer right-drawer ${!activeRightTab ? 'collapsed' : ''}`} aria-hidden={!activeRightTab}>
             <div className="canvas-sidebar-drawer-content" style={{ width: '100%' }}>
               
               {activeRightTab === 'stats' && (
@@ -1576,22 +1717,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
           <div className="canvas-editor-sidebar-strip right-strip">
             <button
               type="button"
-              className={`sidebar-strip-btn toggle-btn ${showRightSidebar ? 'active' : ''}`}
-              onClick={() => {
-                if (showRightSidebar) {
-                  setShowRightSidebar(false);
-                } else {
-                  setShowRightSidebar(true);
-                }
-              }}
-              data-tooltip={showRightSidebar ? 'Recolher painel' : 'Expandir painel'}
-              aria-label={showRightSidebar ? 'Recolher painel direito' : 'Expandir painel direito'}
-            >
-              <SidebarRightIcon />
-            </button>
-            <button
-              type="button"
-              className={`sidebar-strip-btn ${showRightSidebar && activeRightTab === 'page' ? 'active' : ''}`}
+              className={`sidebar-strip-btn ${activeRightTab === 'page' ? 'active' : ''}`}
               onClick={() => handleRightTabClick('page')}
               data-tooltip="Formatos e Dimensões"
               aria-label="Abrir formatos e dimensões"
@@ -1600,7 +1726,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
             </button>
             <button
               type="button"
-              className={`sidebar-strip-btn ${showRightSidebar && activeRightTab === 'margins' ? 'active' : ''}`}
+              className={`sidebar-strip-btn ${activeRightTab === 'margins' ? 'active' : ''}`}
               onClick={() => handleRightTabClick('margins')}
               data-tooltip="Margens e Layout"
               aria-label="Abrir margens e layout"
@@ -1609,7 +1735,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
             </button>
             <button
               type="button"
-              className={`sidebar-strip-btn ${showRightSidebar && activeRightTab === 'search' ? 'active' : ''}`}
+              className={`sidebar-strip-btn ${activeRightTab === 'search' ? 'active' : ''}`}
               onClick={() => handleRightTabClick('search')}
               data-tooltip="Busca e Substituição"
               aria-label="Abrir busca e substituição"
@@ -1618,7 +1744,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
             </button>
             <button
               type="button"
-              className={`sidebar-strip-btn ${showRightSidebar && activeRightTab === 'watermark' ? 'active' : ''}`}
+              className={`sidebar-strip-btn ${activeRightTab === 'watermark' ? 'active' : ''}`}
               onClick={() => handleRightTabClick('watermark')}
               data-tooltip="Marca d'água"
               aria-label="Abrir marca d'água"
@@ -1627,7 +1753,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
             </button>
             <button
               type="button"
-              className={`sidebar-strip-btn ${showRightSidebar && activeRightTab === 'stats' ? 'active' : ''}`}
+              className={`sidebar-strip-btn ${activeRightTab === 'stats' ? 'active' : ''}`}
               onClick={() => handleRightTabClick('stats')}
               data-tooltip="Estatísticas"
               aria-label="Abrir estatísticas"
@@ -1636,7 +1762,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
             </button>
             <button
               type="button"
-              className={`sidebar-strip-btn ${showRightSidebar && activeRightTab === 'export' ? 'active' : ''}`}
+              className={`sidebar-strip-btn ${activeRightTab === 'export' ? 'active' : ''}`}
               onClick={() => handleRightTabClick('export')}
               data-tooltip="Preflight e Exportação"
               aria-label="Abrir preflight e exportação"
@@ -1803,6 +1929,40 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
                 }}
               >
                 Salvar e Sair
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLargeExportWarn && (
+        <div className="confirm-modal-overlay" onClick={() => setShowLargeExportWarn(false)}>
+          <div className="confirm-modal-window" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-modal-header">
+              <h3>Livro grande para PDF raster</h3>
+            </div>
+            <div className="confirm-modal-body">
+              <p>
+                Este livro tem {pageCount} páginas. O “PDF 300 DPI (Raster)” rasteriza cada
+                página em alta resolução e pode travar o navegador em livros grandes. Para este
+                tamanho, prefira o “PDF/X (Offset)”: gera texto vetorial, arquivo leve e é o
+                formato que a gráfica prefere.
+              </p>
+            </div>
+            <div className="confirm-modal-buttons">
+              <button
+                type="button"
+                className="confirm-modal-btn cancel"
+                onClick={() => { setShowLargeExportWarn(false); void runRasterExport(); }}
+              >
+                Continuar com raster
+              </button>
+              <button
+                type="button"
+                className="confirm-modal-btn confirm"
+                onClick={() => { setShowLargeExportWarn(false); void handleExportVectorPdf(); }}
+              >
+                Usar PDF/X (offset)
               </button>
             </div>
           </div>

@@ -1,12 +1,12 @@
 /**
- * Lê o layout REAL renderizado pelo canvas-editor (via o `Draw` interno
- * capturado em canvas-draw-access) e o transforma num CanvasLayoutSnapshot
+ * Lê o layout REAL renderizado pelo canvas-editor (via o `Draw` vendorizado
+ * exposto pelo Editor) e o transforma num CanvasLayoutSnapshot
  * serializável — a entrada da exportação vetorial 1:1.
  *
  * Roda no browser (precisa do Draw vivo). A conversão para PDF é pura e mora em
  * print-export/canvas-vector-pdf.ts.
  */
-import type { CanvasDrawInternal } from './canvas-draw-access';
+import type { CanvasDrawInternal } from './canvas-draw-internal';
 import type { CanvasLayoutGlyph, CanvasLayoutSnapshot } from '../print-export/canvas-vector-types';
 
 interface RawElement {

@@ -7,6 +7,7 @@ import {
   inspectPngDataUrl,
   preflightCanvasPrintExport,
   renderCanvasPrintPdf,
+  renderCanvasPrintPdfFromPreparedPages,
 } from './canvas-raster-print-export';
 import { mmToPt, PRELO_CANVAS_PRESETS } from '../canvas-editor/prelo-canvas-units';
 
@@ -59,6 +60,40 @@ describe('canvas raster print export', () => {
     expect(trim).toMatchObject(media);
     expect(bleed).toMatchObject(media);
     expect(bytes.byteLength).toBeGreaterThan(500);
+  });
+
+  it('prepares high-DPI canvas pages once and then streams page images with UI yields', async () => {
+    const onePixelAt300Dpi = 25.4 / 300;
+    const pageSize = { widthMm: onePixelAt300Dpi, heightMm: onePixelAt300Dpi };
+    const calls: string[] = [];
+
+    const { bytes, report } = await renderCanvasPrintPdfFromPreparedPages({
+      pageSize,
+      preparePageImages: async (pixelRatio) => {
+        calls.push(`prepare:${pixelRatio}`);
+        return 3;
+      },
+      getRenderedPageImage: async (index) => {
+        calls.push(`page:${index}`);
+        return ONE_BY_ONE_PNG;
+      },
+      yieldToMain: async () => {
+        calls.push('yield');
+      },
+    });
+    const pdf = await PDFDocument.load(bytes);
+
+    expect(report.isPrintReadyRaster).toBe(true);
+    expect(pdf.getPageCount()).toBe(3);
+    expect(calls).toEqual([
+      'prepare:3.125',
+      'page:0',
+      'yield',
+      'page:1',
+      'yield',
+      'page:2',
+      'yield',
+    ]);
   });
 });
 

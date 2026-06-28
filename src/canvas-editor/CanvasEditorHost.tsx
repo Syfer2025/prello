@@ -18,8 +18,8 @@ import Editor, {
   type IEditorResult,
   type IWatermark,
   type IElement,
-} from '@hufe921/canvas-editor';
-import { captureDrawDuring, type CanvasDrawInternal } from './canvas-draw-access';
+} from '../vendor/canvas-editor';
+import type { CanvasDrawInternal } from './canvas-draw-internal';
 import { readCanvasLayoutSnapshot } from './canvas-layout-snapshot';
 import { applyHyphenation, stripAutoHyphens } from './canvas-hyphenation';
 import {
@@ -59,6 +59,18 @@ export interface CanvasEditorHandle {
   getLayoutSnapshot(): CanvasLayoutSnapshot | null;
   getPageImages(pixelRatio?: number): Promise<string[]>;
   /**
+   * Prepara uma rodada de exportacao raster em alta resolucao uma unica vez.
+   * Depois disso, `getRenderedPageImage()` le cada canvas sem recomputar o
+   * livro inteiro para cada pagina.
+   */
+  preparePageImageExport(pixelRatio?: number): Promise<number>;
+  /**
+   * Desfaz o pixel ratio alto da exportacao raster: volta a resolucao de tela e
+   * re-renderiza preguicosamente, liberando as canvases gigantes da memoria.
+   * Chamar SEMPRE depois de uma rodada de `preparePageImageExport`.
+   */
+  restoreAfterImageExport(): void;
+  /**
    * Número total de páginas atualmente renderizadas no editor.
    */
   getPageCount(): number;
@@ -68,6 +80,7 @@ export interface CanvasEditorHandle {
    * pois evita alocar todas as páginas em memória simultaneamente.
    */
   getPageImage(index: number, pixelRatio?: number): Promise<string>;
+  getRenderedPageImage(index: number): string;
   insertPageBreak(): void;
   insertSeparator(dashArray?: number[]): void;
   insertTable(rows: number, cols: number): void;
@@ -89,6 +102,10 @@ export interface CanvasEditorHandle {
   zoomIn(): void;
   zoomOut(): void;
   zoomReset(): void;
+  /** Escala atual do editor (1 = 100%). */
+  getPageScale(): number;
+  /** Rola a página informada (1-based) para o topo da área de edição. */
+  scrollToPage(pageNum: number): void;
   toggleBold(): void;
   toggleItalic(): void;
   setFontFamily(family: string): void;
@@ -139,6 +156,8 @@ interface CanvasEditorHostProps {
   firstLineIndentAuto?: boolean;
   /** Notifica se o parágrafo atual está recuado (para o feedback do botão). */
   onFirstLineIndentActiveChange?: (active: boolean) => void;
+  /** Notifica a escala do editor (1 = 100%) ao mudar (botões ou ctrl+roda). */
+  onPageScaleChange?: (scale: number) => void;
 }
 
 export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostProps>(
@@ -153,6 +172,7 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       firstLineIndentMm,
       firstLineIndentAuto,
       onFirstLineIndentActiveChange,
+      onPageScaleChange,
     },
     ref
   ) {
@@ -168,6 +188,9 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
     // Callback de feedback do botão de recuo, via ref (mantém o listener estável).
     const notifyIndentRef = useRef<((active: boolean) => void) | undefined>(onFirstLineIndentActiveChange);
     notifyIndentRef.current = onFirstLineIndentActiveChange;
+    // Callback de escala, via ref (idem) — segue o zoom por botão e por ctrl+roda.
+    const notifyScaleRef = useRef<((scale: number) => void) | undefined>(onPageScaleChange);
+    notifyScaleRef.current = onPageScaleChange;
     const notifyIndentActive = useCallback(() => {
       const draw = drawRef.current;
       if (!draw || !notifyIndentRef.current) return;
@@ -228,9 +251,8 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       const container = containerRef.current;
       if (!container) return;
 
-      const { result: editor, draw } = captureDrawDuring(
-        () => new Editor(container, data, options)
-      );
+      const editor = new Editor(container, data, options);
+      const draw = editor.getDraw() as CanvasDrawInternal;
       editorRef.current = editor;
       drawRef.current = draw;
       hyphenDisabledRef.current = false;
@@ -253,6 +275,8 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       editor.listener.pageSizeChange = (pageCount) => onPageCountChange?.(pageCount);
       // Feedback do botão de recuo: re-avalia o parágrafo atual quando a seleção/estilo muda.
       editor.listener.rangeStyleChange = () => notifyIndentActive();
+      // Mantém o % de zoom em sincronia (inclui ctrl+roda, que não passa pelos botões).
+      editor.listener.pageScaleChange = (scale: number) => notifyScaleRef.current?.(scale);
       notifyIndentActive(); // estado inicial
       onReady?.();
 
@@ -288,7 +312,50 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       notifyIndentActive(); // o modo auto afeta o estado efetivo do botão
     }, [firstLineIndentMm, firstLineIndentAuto, notifyIndentActive]);
 
-    useImperativeHandle(ref, () => ({
+    useImperativeHandle(ref, () => {
+      const preparePageImageExport = async (pixelRatio = 2) => {
+        const draw = drawRef.current as Record<string, unknown> | null;
+        if (!draw) throw new Error('Editor não está pronto');
+        if (typeof draw.setPagePixelRatio === 'function') {
+          draw.setPagePixelRatio(pixelRatio);
+        }
+        if (typeof draw.render === 'function') {
+          draw.render({ isLazy: false, isCompute: false, isSetCursor: false, isSubmitHistory: false });
+        }
+        const observer = draw.imageObserver as { allSettled?: () => Promise<void> } | undefined;
+        await observer?.allSettled?.();
+        const list = draw.pageList;
+        if (!Array.isArray(list)) throw new Error('pageList não disponível');
+        return list.length;
+      };
+
+      const getRenderedPageImage = (index: number) => {
+        const draw = drawRef.current as Record<string, unknown> | null;
+        if (!draw) throw new Error('Editor não está pronto');
+        const list = draw.pageList;
+        if (!Array.isArray(list)) throw new Error('pageList não disponível');
+        const canvas = list[index] as HTMLCanvasElement | undefined;
+        if (!canvas) throw new Error(`Página ${index} não encontrada`);
+        return canvas.toDataURL();
+      };
+
+      const restoreAfterImageExport = () => {
+        const draw = drawRef.current as Record<string, unknown> | null;
+        if (!draw) return;
+        try {
+          if (typeof draw.setPagePixelRatio === 'function') {
+            draw.setPagePixelRatio(null); // null = volta ao devicePixelRatio de tela
+          }
+          if (typeof draw.render === 'function') {
+            draw.render({ isLazy: true, isCompute: false, isSetCursor: false, isSubmitHistory: false });
+          }
+        } catch (error) {
+          console.warn('Falha ao restaurar resolução após exportação raster:', error);
+        }
+      };
+
+      return ({
+      restoreAfterImageExport,
       getValue() {
         const editor = requireEditor(editorRef.current);
         // Remove hífens automáticos ANTES de serializar: o save/JSON fica limpo
@@ -329,30 +396,17 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
         const payload: GetImagePayload = { pixelRatio, mode: EditorMode.PRINT };
         return editor.command.getImage(payload);
       },
+      preparePageImageExport,
       getPageCount() {
         const draw = drawRef.current as Record<string, unknown> | null;
         const list = draw?.pageList;
         return Array.isArray(list) ? list.length : 0;
       },
       async getPageImage(index: number, pixelRatio = 2) {
-        const draw = drawRef.current as Record<string, unknown> | null;
-        if (!draw) throw new Error('Editor não está pronto');
-        // Aplica pixelRatio (afeta render futuro)
-        if (typeof draw.setPagePixelRatio === 'function') {
-          draw.setPagePixelRatio(pixelRatio);
-        }
-        // Garante que o layout esteja atualizado
-        if (typeof draw.render === 'function') {
-          draw.render({ isLazy: false, isCompute: false, isSetCursor: false, isSubmitHistory: false });
-        }
-        const observer = draw.imageObserver as { allSettled?: () => Promise<void> } | undefined;
-        await observer?.allSettled();
-        const list = draw.pageList;
-        if (!Array.isArray(list)) throw new Error('pageList não disponível');
-        const canvas = list[index] as HTMLCanvasElement | undefined;
-        if (!canvas) throw new Error(`Página ${index} não encontrada`);
-        return canvas.toDataURL();
+        await preparePageImageExport(pixelRatio);
+        return getRenderedPageImage(index);
       },
+      getRenderedPageImage,
       insertPageBreak() {
         requireEditor(editorRef.current).command.executePageBreak();
       },
@@ -429,6 +483,21 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       },
       zoomReset() {
         requireEditor(editorRef.current).command.executePageScaleRecovery();
+      },
+      getPageScale() {
+        const editor = editorRef.current;
+        if (!editor) return 1;
+        const scale = editor.command.getOptions().scale;
+        return typeof scale === 'number' && scale > 0 ? scale : 1;
+      },
+      scrollToPage(pageNum: number) {
+        // Usa a lista de páginas do PRÓPRIO editor (API pública do vendor), em vez
+        // de varrer o DOM global por classe CSS — fica restrito a esta instância.
+        const draw = drawRef.current;
+        if (!draw) return;
+        const pages = draw.getPageList();
+        const target = pageNum > 0 ? pages[pageNum - 1] : undefined;
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       },
       toggleBold() {
         requireEditor(editorRef.current).command.executeBold();
@@ -529,7 +598,7 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
         return requireEditor(editorRef.current).command.executePrint();
       },
       getWordCount() {
-        return requireEditor(editorRef.current).command.getWordCount();
+        return Promise.resolve(requireEditor(editorRef.current).command.getWordCount());
       },
       getCatalog() {
         return requireEditor(editorRef.current).command.getCatalog();
@@ -551,7 +620,8 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       focus() {
         requireEditor(editorRef.current).command.executeFocus();
       },
-    }));
+      });
+    });
 
     return <div className="prelo-canvas-editor-host" ref={containerRef} />;
   }

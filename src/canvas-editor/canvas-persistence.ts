@@ -1,4 +1,4 @@
-import type { IEditorResult } from '@hufe921/canvas-editor';
+import type { IEditorResult } from '../vendor/canvas-editor';
 import { bookLayoutSettingsFromPreset, type BookLayoutSettings } from './book-layout-settings';
 import type { PreloCanvasBookPreset } from './prelo-canvas-types';
 

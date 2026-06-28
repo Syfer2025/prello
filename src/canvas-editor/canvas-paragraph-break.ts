@@ -1,4 +1,4 @@
-import type { IElement } from '@hufe921/canvas-editor';
+import type { IElement } from '../vendor/canvas-editor';
 
 interface ParagraphEnterEvent {
   key: string;

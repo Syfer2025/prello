@@ -1,12 +1,18 @@
 /// <reference types="node" />
+import { existsSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+const packageJsonSource = readFileSync(join(process.cwd(), 'package.json'), 'utf8');
 const appShellSource = readFileSync(join(process.cwd(), 'src/product/AppShell.tsx'), 'utf8');
 const canvasShellSource = readFileSync(join(process.cwd(), 'src/product/CanvasEditorShell.tsx'), 'utf8');
 const hostSource = readFileSync(join(process.cwd(), 'src/canvas-editor/CanvasEditorHost.tsx'), 'utf8');
 const productCssSource = readFileSync(join(process.cwd(), 'src/product/product.css'), 'utf8');
+const vendorIndexPath = join(process.cwd(), 'src/vendor/canvas-editor/index.ts');
+const vendorEditorPath = join(process.cwd(), 'src/vendor/canvas-editor/editor/index.ts');
+const vendorIndexSource = existsSync(vendorIndexPath) ? readFileSync(vendorIndexPath, 'utf8') : '';
+const vendorEditorSource = existsSync(vendorEditorPath) ? readFileSync(vendorEditorPath, 'utf8') : '';
 
 describe('canvas editor product integration', () => {
   it('uses CanvasEditorShell as the primary editor surface', () => {
@@ -28,21 +34,62 @@ describe('canvas editor product integration', () => {
     expect(canvasShellSource).toContain('onPersistProject?.(serializedProject)');
   });
 
+  it('does not mark a project as edited when the user only opens and goes back', () => {
+    const backStart = appShellSource.indexOf('const handleBackToDashboard = () => {');
+    const persistStart = appShellSource.indexOf('const handlePersistActiveProject', backStart);
+    const backBlock = appShellSource.slice(backStart, persistStart);
+
+    expect(backBlock).toContain("setScreen('dashboard')");
+    expect(backBlock).not.toContain('persistProjectContent');
+    expect(backBlock).not.toContain('lastEditedIso');
+  });
+
+  it('opens the bundled sample manuscript with real content instead of an empty editor', () => {
+    expect(appShellSource).toContain('LONG_PORTUGUESE_MANUSCRIPT');
+    expect(appShellSource).toContain('initialManuscriptForProject(project)');
+    expect(appShellSource).toContain("project.id === '1'");
+  });
+
   it('does not store instructional placeholder copy as real book text', () => {
     expect(appShellSource).not.toContain('Escreva os capítulos do seu livro aqui');
   });
 
-  it('keeps direct canvas-editor package usage inside the wrapper boundary', () => {
+  it('uses the vendored canvas-editor source instead of the npm package', () => {
+    expect(packageJsonSource).not.toContain('"@hufe921/canvas-editor"');
     expect(appShellSource).not.toContain("from '@hufe921/canvas-editor'");
     expect(canvasShellSource).not.toContain("from '@hufe921/canvas-editor'");
-    expect(hostSource).toContain("from '@hufe921/canvas-editor'");
+    expect(hostSource).not.toContain("from '@hufe921/canvas-editor'");
+    expect(hostSource).toContain("from '../vendor/canvas-editor'");
+    expect(vendorIndexSource).toContain("export { default } from './editor'");
+    expect(vendorIndexSource).toContain("export * from './editor'");
+  });
+
+  it('gets Draw through the vendored public API without the bind interception hack', () => {
+    expect(hostSource).toContain('.getDraw()');
+    expect(hostSource).not.toContain('captureDrawDuring');
+    expect(hostSource).not.toContain('[Prelo] Falha ao capturar o Draw');
+    expect(vendorEditorSource).toContain('public getDraw()');
   });
 
   it('exports through Prelo pdf code instead of browser print dialog', () => {
-    expect(canvasShellSource).toContain('renderCanvasPrintPdf');
+    expect(canvasShellSource).toContain('renderCanvasPrintPdfFromPreparedPages');
     expect(canvasShellSource).toContain('canvasPixelRatioForPrintDpi');
-    expect(canvasShellSource).not.toContain('getPageImages(2)');
+    expect(canvasShellSource).toContain('preparePageImageExport');
+    expect(canvasShellSource).toContain('getRenderedPageImage');
+    expect(canvasShellSource).not.toContain('getPageImage(i, pixelRatio)');
     expect(canvasShellSource).not.toContain('executePrint');
+
+    // O EXPORT continua usando o caminho streaming (página a página), nunca o
+    // getPageImages em lote — esse é reservado à pré-visualização lado a lado.
+    const exportBlock = canvasShellSource.match(
+      /async function runRasterExport\(\) \{[\s\S]*?\n {2}\}/
+    )?.[0] ?? '';
+    expect(exportBlock).toContain('renderCanvasPrintPdfFromPreparedPages');
+    expect(exportBlock).not.toContain('getPageImages');
+
+    // O aviso de livro grande agora é um modal estilizado, não window.confirm.
+    expect(canvasShellSource).not.toContain('window.confirm');
+    expect(canvasShellSource).toContain('showLargeExportWarn');
   });
 
   it('keeps host inputs stable so typing does not recreate the editor every render', () => {
@@ -80,7 +127,7 @@ describe('canvas editor product integration', () => {
 
   it('renders an honest print export preflight panel driven by the export report', () => {
     expect(canvasShellSource).toContain('buildPrintExportPreflight');
-    expect(canvasShellSource).toContain('preflightCanvasPrintExport');
+    expect(canvasShellSource).toContain('renderCanvasPrintPdfFromPreparedPages');
     expect(canvasShellSource).toContain('Preflight');
   });
 
@@ -132,24 +179,72 @@ describe('canvas editor product integration', () => {
     expect(canvasShellSource).toContain('● Salvo na nuvem');
   });
 
-  it('exposes side-by-side review as a real read-only secondary pane', () => {
-    expect(canvasShellSource).toContain('handleTogglePairView');
-    expect(canvasShellSource).toContain('pairView ?');
-    expect(canvasShellSource).toContain('EditorMode.READONLY');
-    expect(canvasShellSource).toContain('data-tooltip={TOOLTIPS.pairView}');
+  it('exposes undo and redo as real toolbar actions', () => {
+    expect(canvasShellSource).toContain('function handleUndo()');
+    expect(canvasShellSource).toContain('editor.undo()');
+    expect(canvasShellSource).toContain('function handleRedo()');
+    expect(canvasShellSource).toContain('editor.redo()');
+    expect(canvasShellSource).toContain('data-tooltip={TOOLTIPS.undo}');
+    expect(canvasShellSource).toContain('data-tooltip={TOOLTIPS.redo}');
+    expect(canvasShellSource).toContain('aria-label="Desfazer"');
+    expect(canvasShellSource).toContain('aria-label="Refazer"');
+  });
 
-    const pairBlock = canvasShellSource.match(/pairView \? \([\s\S]*?\) : \(/)?.[0] ?? '';
-    expect(pairBlock).toContain('ref={editorRef}');
-    expect(pairBlock).toContain('ref={editorRef2}');
-    expect(pairBlock).toContain('options={reviewOptions}');
-    expect(pairBlock).not.toContain('ref={editorRef2}[\s\S]*onChange={handleChange}');
+  it('removes the complete/simple mode toggle from the product header', () => {
+    expect(canvasShellSource).not.toContain('simpleMode');
+    expect(canvasShellSource).not.toContain('setSimpleMode');
+    expect(canvasShellSource).not.toContain('Completo');
+    expect(canvasShellSource).not.toContain('Simples');
+    expect(productCssSource).not.toContain('canvas-mode-toggle');
+    expect(productCssSource).not.toContain('simple-mode');
+  });
+
+  it('renders side-by-side review as a read-only image spread over a single editor instance', () => {
+    expect(canvasShellSource).toContain('handleTogglePairView');
+    expect(canvasShellSource).toContain('data-tooltip={TOOLTIPS.pairView}');
+    // Editor ao vivo único e SEM o antigo truque de CSS de colunas.
+    expect(canvasShellSource.match(/<CanvasEditorHost/g)?.length ?? 0).toBe(1);
+    expect(canvasShellSource).not.toContain('editorRef2');
+    expect(canvasShellSource).not.toContain("pairView ? ' pair-view'");
+    expect(productCssSource).not.toContain('.canvas-editor-stage.pair-view');
+    expect(productCssSource).not.toContain('grid-template-columns: repeat(2, max-content)');
+
+    // O spread usa imagens das páginas renderizadas (sem editar — sem bug de cursor).
+    expect(canvasShellSource).toContain('getPageImages');
+    expect(canvasShellSource).toContain('buildSpreads');
+    expect(canvasShellSource).toContain('canvas-spread-overlay');
+    expect(canvasShellSource).toContain('handleOpenPageFromSpread');
+
+    // Clicar numa página sai do spread e volta a editar naquela página, de forma
+    // determinística: guarda a página num ref e rola num efeito após o overlay
+    // desmontar (sem setTimeout de "chute").
+    expect(canvasShellSource).toContain('setPairView(false)');
+    expect(canvasShellSource).toContain('pendingJumpPageRef.current = pageNo');
+    expect(canvasShellSource).toContain('scrollToPage');
+    expect(canvasShellSource).not.toContain('setTimeout(() => handleJumpToPage');
+
+    // Estilos do spread presentes.
+    expect(productCssSource).toContain('.canvas-spread-overlay');
+    expect(productCssSource).toContain('.canvas-spread-row');
+    expect(productCssSource).toContain('.canvas-spread-page');
+  });
+
+  it('groups spread pages as an open book: first page alone on the right, then pairs', () => {
+    const buildSpreadsBlock = canvasShellSource.match(
+      /function buildSpreads\(images: string\[\]\): SpreadSlot\[\]\[\] \{[\s\S]*?\n\}/
+    )?.[0] ?? '';
+    expect(buildSpreadsBlock).toContain('if (!first) return []');
+    expect(buildSpreadsBlock).toContain('[[null, first]]');
+    expect(buildSpreadsBlock).toContain('i += 2');
   });
 
   it('keeps side menu strips focused on one active tab instead of lighting every icon', () => {
     expect(canvasShellSource).toContain("type LeftTab = 'chapters' | 'pages';");
-    expect(canvasShellSource).toContain("const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('chapters');");
+    expect(canvasShellSource).toContain("const [activeLeftTab, setActiveLeftTab] = useState<LeftTab | null>('chapters');");
+    expect(canvasShellSource).toContain("setActiveLeftTab(current => current === tab ? null : tab)");
     expect(canvasShellSource).toContain("type RightTab = 'page' | 'margins' | 'search' | 'watermark' | 'export' | 'stats';");
-    expect(canvasShellSource).toContain("const [activeRightTab, setActiveRightTab] = useState<RightTab>('page');");
+    expect(canvasShellSource).toContain("const [activeRightTab, setActiveRightTab] = useState<RightTab | null>('page');");
+    expect(canvasShellSource).toContain("setActiveRightTab(current => current === tab ? null : tab)");
     expect(canvasShellSource).not.toContain("activeLeftTab === 'all' ||");
     expect(canvasShellSource).not.toContain("activeRightTab === 'all' ||");
     expect(canvasShellSource).not.toContain("setActiveLeftTab('all')");
@@ -157,8 +252,8 @@ describe('canvas editor product integration', () => {
   });
 
   it('fully collapses side drawers without leaving drawer content behind the icon strips', () => {
-    expect(canvasShellSource).toContain("canvas-editor-left-sidebar-container ${!showLeftSidebar ? 'drawer-collapsed' : ''}");
-    expect(canvasShellSource).toContain("canvas-editor-right-sidebar-container ${!showRightSidebar ? 'drawer-collapsed' : ''}");
+    expect(canvasShellSource).toContain("canvas-editor-left-sidebar-container ${!activeLeftTab ? 'drawer-collapsed' : ''}");
+    expect(canvasShellSource).toContain("canvas-editor-right-sidebar-container ${!activeRightTab ? 'drawer-collapsed' : ''}");
     expect(productCssSource).toContain('.canvas-editor-left-sidebar-container.drawer-collapsed');
     expect(productCssSource).toContain('.canvas-editor-right-sidebar-container.drawer-collapsed');
 

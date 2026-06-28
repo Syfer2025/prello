@@ -7,7 +7,7 @@ import {
   redistributeJustificationToWordSpaces,
   toggleFirstLineIndentForSelection,
 } from './canvas-word-justification';
-import type { CanvasDrawInternal } from './canvas-draw-access';
+import type { CanvasDrawInternal } from './canvas-draw-internal';
 
 interface TestElement {
   value: string;
@@ -259,14 +259,16 @@ describe('manual first-line indent toolbar state', () => {
 });
 
 describe('installCanvasWordJustificationPatch', () => {
-  it('wraps computeRowList and adjusts justified rows returned by the canvas editor', () => {
+  it('registers a computeRowList hook (no method replacement) that adjusts justified rows', () => {
     const row = {
       width: 120,
       rowFlex: 'alignment',
       elementList: [el('A', 10), el(' ', 5), el('B', 10)],
     };
+    let hook: ((rowList: unknown[], payload: unknown) => void) | null = null;
     const draw = {
-      computeRowList: () => [row],
+      setComputeRowListHook: (fn: typeof hook) => { hook = fn; },
+      getInnerWidth: () => 120,
       getOptions: () => ({ scale: 1 }),
       getElementFont: () => '13px Crimson Text',
     } as unknown as CanvasDrawInternal;
@@ -275,9 +277,11 @@ describe('installCanvasWordJustificationPatch', () => {
       measureElementWidth: (element: TestElement) => element.naturalWidth!,
     });
 
-    const rows = draw.computeRowList!({ innerWidth: 120 }) as unknown as typeof row[];
+    // O editor chamaria o hook ao final de computeRowList, com as linhas montadas.
+    expect(hook).toBeTypeOf('function');
+    hook!([row], { innerWidth: 120 });
 
-    expect(rows[0]!.elementList.map((element) => element.metrics.width)).toEqual([10, 100, 10]);
+    expect(row.elementList.map((element) => element.metrics.width)).toEqual([10, 100, 10]);
   });
 });
 

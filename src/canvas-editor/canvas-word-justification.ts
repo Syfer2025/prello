@@ -1,4 +1,4 @@
-import type { CanvasDrawInternal } from './canvas-draw-access';
+import type { CanvasDrawInternal } from './canvas-draw-internal';
 import { mmToPx } from './prelo-canvas-units';
 
 interface WordJustificationElement {
@@ -330,17 +330,16 @@ export function installCanvasWordJustificationPatch<Element extends WordJustific
   draw: CanvasDrawInternal,
   options: PatchOptions<Element> = {}
 ): () => void {
-  const target = draw as CanvasDrawInternal & {
-    computeRowList?: (payload: unknown) => unknown[];
-  };
-  const original = target.computeRowList;
-  if (typeof original !== 'function') return () => undefined;
+  // Registra o hook OFICIAL do editor vendorizado (não substitui mais o método).
+  // O `Draw` chama isto no fim de computeRowList, antes de devolver as linhas.
+  const registerHook = draw.setComputeRowListHook;
+  if (typeof registerHook !== 'function') return () => undefined;
 
   const measureElementWidth =
     options.measureElementWidth ?? createCanvasElementMeasurer<Element>(draw);
 
-  target.computeRowList = function patchedComputeRowList(payload: unknown): unknown[] {
-    const rows = original.call(this, payload) as WordJustificationRow<Element>[];
+  registerHook.call(draw, (rowList: unknown[], payload: unknown) => {
+    const rows = rowList as WordJustificationRow<Element>[];
     const innerWidth =
       typeof (payload as ComputeRowPayload | undefined)?.innerWidth === 'number'
         ? (payload as ComputeRowPayload).innerWidth!
@@ -358,11 +357,10 @@ export function installCanvasWordJustificationPatch<Element extends WordJustific
 
     // 2) Justificação por espaços (lê row.offsetX para fechar na margem).
     redistributeJustificationToWordSpaces(rows, { innerWidth, measureElementWidth });
-    return rows;
-  };
+  });
 
   return () => {
-    target.computeRowList = original;
+    registerHook.call(draw, null);
   };
 }
 

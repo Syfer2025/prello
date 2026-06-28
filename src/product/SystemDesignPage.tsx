@@ -95,11 +95,11 @@ export default function SystemDesignPage({ onBack }: SystemDesignPageProps) {
               <tbody>
                 <tr><td><code>AppShell.tsx</code></td><td><code>CanvasEditorShell</code>, <code>canvas-persistence</code>, <code>book-layout-settings</code>, <code>prelo-canvas-units</code>, <code>prelo-canvas-data</code>, <code>project-content-storage</code></td><td><code>AppShell</code> (default)</td></tr>
                 <tr><td><code>CanvasEditorShell.tsx</code></td><td><code>CanvasEditorHost</code>, <code>canvas-persistence</code>, <code>book-layout-settings</code>, <code>prelo-canvas-units</code>, <code>prelo-canvas-data</code>, <code>first-line-indent-preferences</code>, <code>print-export</code></td><td><code>CanvasEditorShell</code> (default)</td></tr>
-                <tr><td><code>CanvasEditorHost.tsx</code></td><td><code>@hufe921/canvas-editor</code></td><td><code>CanvasEditorHost</code>, <code>CanvasEditorHandle</code>, <code>ICatalog</code>, enums</td></tr>
+                <tr><td><code>CanvasEditorHost.tsx</code></td><td><code>vendor/canvas-editor</code></td><td><code>CanvasEditorHost</code>, <code>CanvasEditorHandle</code>, <code>ICatalog</code>, enums</td></tr>
                 <tr><td><code>canvas-persistence.ts</code></td><td>— (vanilla TS)</td><td><code>saveCanvasProject</code>, <code>loadCanvasProject</code>, <code>CANVAS_STORAGE_KEY</code></td></tr>
                 <tr><td><code>project-content-storage.ts</code></td><td><code>canvas-persistence</code> (KeyValueStore)</td><td><code>persistProjectContent</code>, <code>projectContentStorageKey</code></td></tr>
                 <tr><td><code>book-layout-settings.ts</code></td><td><code>prelo-canvas-types</code></td><td><code>bookLayoutSettingsFromPreset</code>, <code>BookLayoutSettings</code></td></tr>
-                <tr><td><code>prelo-canvas-data.ts</code></td><td><code>book-layout-settings</code>, <code>prelo-canvas-units</code>, <code>@hufe921/canvas-editor</code></td><td><code>buildCanvasDocument</code>, <code>BuiltCanvasDocument</code></td></tr>
+                <tr><td><code>prelo-canvas-data.ts</code></td><td><code>book-layout-settings</code>, <code>prelo-canvas-units</code>, <code>vendor/canvas-editor</code></td><td><code>buildCanvasDocument</code>, <code>BuiltCanvasDocument</code></td></tr>
                 <tr><td><code>first-line-indent-preferences.ts</code></td><td>— (vanilla TS)</td><td><code>loadFirstLineIndentAuto</code>, <code>saveFirstLineIndentAuto</code>, <code>loadFirstLineIndentMm</code>, <code>saveFirstLineIndentMm</code></td></tr>
               </tbody>
             </table>
@@ -132,7 +132,7 @@ export default function SystemDesignPage({ onBack }: SystemDesignPageProps) {
                 `    version: <span class="sd-code-type">number</span>;`,
                 `    name: <span class="sd-code-type">string</span>;           <span class="sd-code-comment">// project name</span>`,
                 `    bookLayout: <span class="sd-code-type">BookLayoutSettings</span>;`,
-                `    editor: <span class="sd-code-type">IEditorResult</span>;   <span class="sd-code-comment">// @hufe921/canvas-editor</span>`,
+                `    editor: <span class="sd-code-type">IEditorResult</span>;   <span class="sd-code-comment">// vendor/canvas-editor</span>`,
                 `    savedAtIso: <span class="sd-code-type">string</span>;`,
                 `  }`,
                 ``,
@@ -537,7 +537,7 @@ export default function SystemDesignPage({ onBack }: SystemDesignPageProps) {
 
       {/* Footer info */}
       <div className="sd-footer">
-        <span>Prelo v0.1 · React 19 · Vite 8 · TypeScript strict · @hufe921/canvas-editor · localStorage</span>
+        <span>Prelo v0.1 · React 19 · Vite 8 · TypeScript strict · canvas-editor vendorizado · localStorage</span>
       </div>
     </div>
   );

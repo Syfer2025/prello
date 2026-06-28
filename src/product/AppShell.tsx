@@ -4,6 +4,7 @@ import { saveCanvasProject, CANVAS_STORAGE_KEY } from '../canvas-editor/canvas-p
 import { bookLayoutSettingsFromPreset } from '../canvas-editor/book-layout-settings';
 import { PRELO_CANVAS_PRESETS } from '../canvas-editor/prelo-canvas-units';
 import { buildCanvasDocument } from '../canvas-editor/prelo-canvas-data';
+import { LONG_PORTUGUESE_MANUSCRIPT } from '../fixtures/long-portuguese-manuscript';
 import { persistProjectContent, projectContentStorageKey } from './project-content-storage';
 import './product.css';
 import SystemDesignPage from './SystemDesignPage';
@@ -58,6 +59,16 @@ const DEFAULT_PROJECTS: ProjectMetadata[] = [
   { id: '2', name: 'Dom Casmurro', author: 'Machado de Assis', preset: '6x9', lastEditedIso: '2026-06-22T12:00:00Z' },
   { id: '3', name: 'O Cortiço', author: 'Aluísio Azevedo', preset: 'a5', lastEditedIso: '2026-06-21T09:30:00Z' },
 ];
+
+function bookPresetForProject(project: Pick<ProjectMetadata, 'preset'>) {
+  return project.preset === 'sixByNine' || project.preset === '6x9'
+    ? PRELO_CANVAS_PRESETS.sixByNine
+    : PRELO_CANVAS_PRESETS.a5;
+}
+
+function initialManuscriptForProject(project: Pick<ProjectMetadata, 'id'>): string {
+  return project.id === '1' ? LONG_PORTUGUESE_MANUSCRIPT : '';
+}
 
 export default function AppShell() {
   // Auth state
@@ -189,11 +200,11 @@ export default function AppShell() {
       localStorage.setItem(CANVAS_STORAGE_KEY, savedContent);
     } else {
       // If none exists, initialize default
-      const bookLayoutPreset = project.preset === 'sixByNine' ? PRELO_CANVAS_PRESETS.sixByNine : PRELO_CANVAS_PRESETS.a5;
+      const bookLayoutPreset = bookPresetForProject(project);
       const defaultLayout = bookLayoutSettingsFromPreset(bookLayoutPreset);
       const initialDoc = buildCanvasDocument({
         title: project.name,
-        manuscript: '',
+        manuscript: initialManuscriptForProject(project),
         bookLayout: defaultLayout,
       });
 
@@ -212,19 +223,6 @@ export default function AppShell() {
   };
 
   const handleBackToDashboard = () => {
-    // Save current active editor content back to the project content store
-    if (activeProjectId) {
-      const currentContent = localStorage.getItem(CANVAS_STORAGE_KEY);
-      persistProjectContent(window.localStorage, activeProjectId, currentContent);
-      
-      // Update last edited timestamp in projects metadata list
-      setProjects(prev => prev.map(p => {
-        if (p.id === activeProjectId) {
-          return { ...p, lastEditedIso: new Date().toISOString() };
-        }
-        return p;
-      }));
-    }
     setActiveProjectId(null);
     setScreen('dashboard');
   };

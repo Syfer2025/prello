@@ -1,134 +1,51 @@
-## Imported Claude Cowork project instructions
+# AGENTS.md — Prelo Diagramador
 
-You are a senior software architect and product designer.
+Guia para agentes de IA que trabalham neste repositório. Comentários e mensagens ao usuário em **português (PT-BR)**.
 
-I want you to create a complete, realistic, and technically detailed action plan for building a modern SaaS application based on the concept below.
+## O que é
 
-## 💡 PRODUCT CONCEPT
+Prelo é um **editor de diagramação de livro no navegador**: o autor escreve/formata o miolo e exporta PDF para prova (raster) e para gráfica (offset, PDF/X-1a CMYK). O foco é tipografia de livro (margens espelhadas, recuo de 1ª linha, justificação, hifenização PT).
 
-The app is an "idea development system" where users start with a core idea and expand it visually.
+## Onde está o código ATIVO
 
-The interface is NOT a traditional graph with lines.
+O produto ativo é **`prelo-main/diagramador/src`** (este projeto). Stack: **React + Vite + TypeScript**, testes com **vitest**.
 
-Instead, it uses a **minimalist orbital system**:
+> ⚠️ Existe uma pasta aninhada `diagramador/diagramador/` e `prototipo-motor/` com o **motor próprio LEGADO** (Knuth-Plass via `tex-linebreak`, engine/model/render). **Não é o produto ativo** — o dev server não a builda e o ESLint a ignora (`globalIgnores(['dist','diagramador'])`). Não edite essas pastas achando que é o app.
 
-* A central node represents the main idea
-* Secondary ideas orbit around it in smooth circular/elliptical paths
-* No visible connection lines between nodes
-* Relationships are expressed through:
+## Arquitetura — fronteira importante
 
-  * proximity
-  * orbit level (distance from center)
-  * grouping
-* The system should feel alive, fluid, and intelligent
+- O editor é a lib **`@hufe921/canvas-editor`**, encapsulada em **`src/canvas-editor/CanvasEditorHost.tsx`**. Essa é a ÚNICA fronteira que pode importar a lib — há teste garantindo que `AppShell`/`CanvasEditorShell` **não** importem `@hufe921/canvas-editor` direto. Ao trocar/atualizar a lib, mexa só no Host.
+- **UI principal:** `src/product/CanvasEditorShell.tsx` (toolbar, sidebars, spread "lado a lado", export).
+- **Persistência local:** `src/canvas-editor/canvas-persistence.ts` (localStorage).
+- **Presets/medidas:** `src/canvas-editor/book-layout-settings.ts`, `prelo-canvas-units.ts`.
+- **Export raster 300 DPI:** `src/print-export/canvas-raster-print-export.ts` (pdf-lib).
+- **Export vetorial/offset:** `src/print-export/canvas-vector-*` + endpoint local `/api/pdfx` (Ghostscript) + `npm run pdfx`.
 
-## 🎯 CORE EXPERIENCE
+## Gotchas que mordem
 
-* The user writes a main idea
-* The system places it at the center
-* The user (or AI) adds supporting ideas
-* These ideas automatically organize into orbits
-* The more relevant an idea becomes, the closer it moves to the center
-* If a secondary idea becomes more important, it can become the new center
+1. **Hack frágil mas deliberado:** `src/canvas-editor/canvas-draw-access.ts` captura o `Draw` interno da lib interceptando `Function.prototype.bind` numa janela síncrona (restaurada no `finally`). Disso dependem justificação por palavra, snapshot de layout e export vetorial. Está **pinado em `@hufe921/canvas-editor@0.9.136`**. Se a captura falhar, o Host loga `console.error` e os recursos avançados caem — qualquer upgrade da lib precisa revalidar este arquivo.
+2. **PDF é WYSIWYG:** a exportação serializa o **layout REAL** renderizado pelo canvas-editor (não re-diagrama). O canvas-editor é a autoridade de layout.
+3. **"Lado a lado" é SÓ LEITURA:** spread de imagens das páginas (a lib prende cursor/seleção a 1 coluna vertical; layout em grid quebrava o clique). Ver `CanvasEditorShell` (`buildSpreads`, `openPairView`).
+4. **Export raster trava em livros grandes:** ~17 MB/página A5 a 300 DPI → use o **vetorial** para livros grandes (já há aviso acima de 60 páginas).
+5. **Fontes:** só famílias **embutíveis** entram no PDF; `letterClass` PT evita quebra de palavra acentuada.
 
-## ⚙️ CRITICAL FEATURES
+## Comandos
 
-1. Smooth orbital animation (VERY IMPORTANT)
+```bash
+npm run dev          # Vite (porta 5173)
+npm test             # vitest (suite completa)
+npm run smoke:canvas # testes-chave de canvas/export
+npm run lint         # eslint
+npm run build        # tsc -b && vite build
+npm run pdfx -- arquivo.pdf   # converte PDF vetorial em PDF/X-1a (Ghostscript local)
+```
 
-   * Nodes should slowly orbit around the center
-   * Motion must be subtle, not distracting
-   * Should feel like a living system, not a physics simulator
+## Convenções de teste
 
-2. Dynamic gravity system
+Muitos testes em `src/product/*.test.ts` são **asserções sobre o código-fonte** (ex.: garantem que tal handler/CSS existe). Ao mudar a UI, atualize esses testes junto. Rode `npm test` + `npm run lint` + `npx tsc -b` antes de concluir.
 
-   * Each idea has a "weight"
-   * Weight is based on:
+## Estilo
 
-     * user interaction
-     * connections (implicit)
-     * AI suggestions
-   * The layout updates automatically
-
-3. AI integration
-
-   * Suggest new ideas related to the core
-   * Suggest merging or reorganizing ideas
-   * User must approve/reject suggestions
-
-4. Minimalist UI
-
-   * Similar simplicity to Obsidian graph view
-   * Neutral colors (dark mode preferred)
-   * Clean typography
-   * No visual clutter
-
-5. Interaction
-
-   * Click node → open/edit idea
-   * Drag to reposition (optional override)
-   * Zoom in/out smoothly
-   * Focus mode (highlight one idea + nearby nodes)
-
-## 🧪 MVP SCOPE
-
-Define a realistic MVP including:
-
-* What features to build first
-* What to ignore initially
-* How to validate product-market fit quickly
-
-## 🏗️ TECHNICAL ARCHITECTURE
-
-Propose a full stack including:
-
-Frontend:
-
-* Framework (React, etc.)
-* Rendering approach (Canvas, SVG, WebGL)
-* Animation system (important)
-
-Graph/Orbit Engine:
-
-* How to simulate orbit behavior WITHOUT heavy physics engines
-* Efficient layout algorithm
-
-Backend:
-
-* API structure
-* Database model for ideas and relationships
-
-AI:
-
-* How to integrate (OpenAI or similar)
-* Prompt strategy for idea suggestions
-
-## ⚡ PERFORMANCE
-
-* How to handle hundreds or thousands of nodes
-* Optimization strategies
-* Rendering techniques
-
-## 🎨 DESIGN SYSTEM
-
-* UI/UX principles
-* Motion design guidelines
-* How to keep it simple but “wow”
-
-## 🚀 ROADMAP
-
-Break into phases:
-
-* MVP
-* V1
-* V2
-
-## ⚠️ RISKS
-
-List real technical and product risks and how to mitigate them.
-
-## 🎯 GOAL
-
-The final result should feel like:
-"A living system that helps users think, not just store notes"
-
-Be extremely practical and avoid generic advice.
+- PT-BR em comentários e textos de UI.
+- Combine com o código ao redor (densidade de comentário, nomes, idioma).
+- Não commitar sem pedido explícito; export/ações externas exigem confirmação.

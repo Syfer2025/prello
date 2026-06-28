@@ -1,4 +1,4 @@
-import { ElementType } from '@hufe921/canvas-editor';
+import { ElementType } from '../vendor/canvas-editor';
 import { describe, expect, it } from 'vitest';
 import {
   buildCanvasDocument,

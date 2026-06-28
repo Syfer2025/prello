@@ -1,4 +1,4 @@
-import { ElementType } from '@hufe921/canvas-editor';
+import { ElementType } from '../vendor/canvas-editor';
 import { PDFDocument } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import type { KeyValueStore } from './canvas-persistence';
@@ -136,5 +136,5 @@ describe('canvas editor stress', () => {
         pdfMs: Math.round(result.pdfMs),
       }))
     );
-  });
+  }, 15_000);
 });

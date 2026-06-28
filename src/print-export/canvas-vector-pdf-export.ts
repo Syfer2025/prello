@@ -4,8 +4,8 @@
  * offset — o passo seguinte (PDF/X-1a + CMYK + ICC) é feito pelo endpoint/CLI
  * local com Ghostscript.
  *
- * Não importa '@hufe921/canvas-editor' (mantém o acoplamento no CanvasEditorHost):
- * o conteúdo entra como CanvasLayoutSnapshot, capturado pelo wrapper.
+ * Não importa o editor vendorizado (mantém o acoplamento no CanvasEditorHost):
+ * o conteúdo entra como CanvasLayoutSnapshot, lido pelo wrapper.
  */
 import type { BookLayoutSettings } from '../canvas-editor/book-layout-settings';
 import { snapshotToVectorDocument } from './canvas-vector-pdf';

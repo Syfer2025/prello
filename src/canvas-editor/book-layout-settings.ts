@@ -1,4 +1,4 @@
-import { PageMode, type IEditorOption } from '@hufe921/canvas-editor';
+import { PageMode, type IEditorOption } from '../vendor/canvas-editor';
 import type { PreloCanvasBookPreset } from './prelo-canvas-types';
 import { mmToPx } from './prelo-canvas-units';
 
