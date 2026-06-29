@@ -45,6 +45,26 @@ describe('snapshotToVectorDocument', () => {
     expect(run.width).toBeCloseTo(8 * KX, 3);
   });
 
+  it('mapeia imagem px->pt no canto inferior-esquerdo (Y invertido)', () => {
+    const snap: CanvasLayoutSnapshot = {
+      pageWidthPx: PAGE_W,
+      pageHeightPx: PAGE_H,
+      pageCount: 1,
+      glyphs: [],
+      images: [
+        { pageNo: 0, x: 100, yTop: 50, width: 120, height: 90, dataUrl: 'data:image/png;base64,iVBORw0KGgo=' },
+      ],
+      skipped: { images: 0, tables: 0, other: 0 },
+    };
+    const img = snapshotToVectorDocument(snap, A5).pages[0]!.images![0]!;
+    expect(img.x).toBeCloseTo(100 * KX, 3);
+    // y é o canto INFERIOR: altura da página - (topo + altura) da imagem.
+    expect(img.y).toBeCloseTo(mmToPt(A5.heightMm) - (50 + 90) * KY, 3);
+    expect(img.width).toBeCloseTo(120 * KX, 3);
+    expect(img.height).toBeCloseTo(90 * KY, 3);
+    expect(img.dataUrl).toBe('data:image/png;base64,iVBORw0KGgo=');
+  });
+
   it('agrupa glifos contíguos de mesmo estilo numa run', () => {
     const doc = snapshotToVectorDocument(
       snapshot([glyph({ value: 'A', x: 64, width: 8 }), glyph({ value: 'B', x: 72, width: 6 })]),

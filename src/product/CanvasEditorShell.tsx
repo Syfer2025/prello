@@ -6,6 +6,7 @@ import {
   TitleLevel,
   ListType,
   ListStyle,
+  ImageDisplay,
   type ICatalog,
 } from '../canvas-editor/CanvasEditorHost';
 import { CANVAS_STORAGE_KEY, loadCanvasProject, saveCanvasProject } from '../canvas-editor/canvas-persistence';
@@ -278,6 +279,8 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   const [watermarkText, setWatermarkText] = useState('');
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showLargeExportWarn, setShowLargeExportWarn] = useState(false);
+  // Barrinha flutuante de opções da imagem clicada (posição do clique na tela).
+  const [imageBar, setImageBar] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (state.dirty) {
@@ -793,6 +796,14 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   function handleTogglePairView() {
     if (pairView) closePairView();
     else openPairView();
+  }
+
+  // Aplica o modo de exibição à imagem clicada (em linha / acima-abaixo / contorno).
+  function applyImageDisplay(display: ImageDisplay) {
+    editorRef.current?.setImageDisplay(display);
+    setImageBar(null);
+    setState((current) => ({ ...current, dirty: true }));
+    window.setTimeout(refreshWordCount, 0);
   }
 
   // Sai do spread e leva o editor até a página clicada (volta a poder editar).
@@ -1322,6 +1333,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
               firstLineIndentAuto={firstLineIndentAuto}
               onFirstLineIndentActiveChange={setFirstLineIndentActive}
               onPageScaleChange={handlePageScaleChange}
+              onImageSelected={setImageBar}
             />
           </main>
 
@@ -1902,6 +1914,19 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
       )}
 
       {/* ── Exit Confirmation Modal ── */}
+      {imageBar && (
+        <div
+          className="canvas-image-bar"
+          style={{ position: 'fixed', left: imageBar.x, top: Math.max(8, imageBar.y - 48), zIndex: 1200 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button type="button" className="canvas-image-bar-btn" onClick={() => applyImageDisplay(ImageDisplay.INLINE)} data-tooltip="Imagem em linha com o texto">Em linha</button>
+          <button type="button" className="canvas-image-bar-btn" onClick={() => applyImageDisplay(ImageDisplay.BLOCK)} data-tooltip="Texto acima e abaixo da imagem">Acima/abaixo</button>
+          <button type="button" className="canvas-image-bar-btn" onClick={() => applyImageDisplay(ImageDisplay.SURROUND)} data-tooltip="Texto contorna a imagem">Contornar texto</button>
+          <button type="button" className="canvas-image-bar-close" onClick={() => setImageBar(null)} aria-label="Fechar opções da imagem">×</button>
+        </div>
+      )}
+
       {showExitConfirm && (
         <div className="confirm-modal-overlay" onClick={() => setShowExitConfirm(false)}>
           <div className="confirm-modal-window" onClick={(e) => e.stopPropagation()}>

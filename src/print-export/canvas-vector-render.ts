@@ -29,6 +29,7 @@ import type {
   FontVariantKey,
   PdfBox,
 } from './canvas-vector-types';
+import { dataUrlToBytes } from '../canvas-editor/canvas-pdf-export';
 
 export type FontBytes = Uint8Array | ArrayBuffer;
 /** TTFs por família e variante. Faltando uma variante, cai em regular. */
@@ -151,6 +152,19 @@ export async function renderCanvasVectorPdf(
         thickness: mark.thickness,
         color: hexToColor(mark.color),
       });
+    }
+
+    // Imagens: desenhadas antes do texto. PNG/JPEG embutidos via pdf-lib.
+    // Formatos não suportados (SVG/GIF) são ignorados sem quebrar a exportação.
+    for (const img of pagePlacement.images ?? []) {
+      try {
+        const bytes = dataUrlToBytes(img.dataUrl);
+        const isPng = /^data:image\/png/i.test(img.dataUrl);
+        const embedded = isPng ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+        page.drawImage(embedded, { x: img.x, y: img.y, width: img.width, height: img.height });
+      } catch (error) {
+        console.warn('Imagem ignorada na exportação vetorial (formato não suportado?):', error);
+      }
     }
 
     for (const run of pagePlacement.runs) {

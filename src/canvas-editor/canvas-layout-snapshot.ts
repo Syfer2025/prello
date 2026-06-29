@@ -7,7 +7,11 @@
  * print-export/canvas-vector-pdf.ts.
  */
 import type { CanvasDrawInternal } from './canvas-draw-internal';
-import type { CanvasLayoutGlyph, CanvasLayoutSnapshot } from '../print-export/canvas-vector-types';
+import type {
+  CanvasLayoutGlyph,
+  CanvasLayoutImage,
+  CanvasLayoutSnapshot,
+} from '../print-export/canvas-vector-types';
 
 interface RawElement {
   value?: string;
@@ -32,7 +36,7 @@ interface RawPosition {
   coordinate: { leftTop: number[]; leftBottom: number[] };
 }
 
-const SKIP_TYPES = new Set(['image', 'table', 'latex']);
+const SKIP_TYPES = new Set(['table', 'latex']);
 const ZERO_WIDTH = '​';
 
 function num(value: unknown, fallback = 0): number {
@@ -49,6 +53,7 @@ export function readCanvasLayoutSnapshot(draw: CanvasDrawInternal): CanvasLayout
   const elementList = draw.getOriginalMainElementList() as unknown as RawElement[];
 
   const glyphs: CanvasLayoutGlyph[] = [];
+  const images: CanvasLayoutImage[] = [];
   const skipped = { images: 0, tables: 0, other: 0 };
   let maxPage = 0;
 
@@ -58,13 +63,32 @@ export function readCanvasLayoutSnapshot(draw: CanvasDrawInternal): CanvasLayout
     const el = elementList[i] ?? {};
     maxPage = Math.max(maxPage, num(pos.pageNo));
 
+    // Imagem: capturada ANTES do filtro de valor vazio (o pos.value de imagem
+    // costuma ser vazio). Guarda posição/tamanho reais + os bytes base64.
+    if (el.type === 'image') {
+      const lt = pos.coordinate?.leftTop ?? [0, 0];
+      const dataUrl = typeof el.value === 'string' ? el.value : '';
+      if (dataUrl) {
+        images.push({
+          pageNo: num(pos.pageNo),
+          x: num(lt[0]) / scale,
+          yTop: num(lt[1]) / scale,
+          width: num(pos.metrics?.width) / scale,
+          height: num(pos.metrics?.height) / scale,
+          dataUrl,
+        });
+      } else {
+        skipped.images += 1;
+      }
+      continue;
+    }
+
     const value = pos.value ?? el.value ?? '';
     if (value === '' || value === '\n' || value === ZERO_WIDTH) continue;
 
     const type = el.type;
     if (type && SKIP_TYPES.has(type)) {
-      if (type === 'image') skipped.images += 1;
-      else if (type === 'table') skipped.tables += 1;
+      if (type === 'table') skipped.tables += 1;
       else skipped.other += 1;
       continue;
     }
@@ -99,6 +123,7 @@ export function readCanvasLayoutSnapshot(draw: CanvasDrawInternal): CanvasLayout
     pageHeightPx: num(draw.getOriginalHeight(), 794),
     pageCount: maxPage + 1,
     glyphs,
+    images,
     skipped,
   };
 }

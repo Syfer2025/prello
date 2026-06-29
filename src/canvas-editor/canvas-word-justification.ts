@@ -6,6 +6,9 @@ interface WordJustificationElement {
   type?: string;
   size?: number;
   letterSpacing?: number;
+  /** Deslocamento horizontal do 1º elemento da linha; em linhas de contorno é a
+   *  intrusão da imagem (translateX): a largura "comida" pela imagem à esquerda. */
+  left?: number;
   metrics?: { width?: number };
   extension?: { firstLineIndent?: boolean } | null;
 }
@@ -15,6 +18,8 @@ interface WordJustificationRow<Element extends WordJustificationElement> {
   rowFlex?: string;
   isWidthNotEnough?: boolean;
   isList?: boolean;
+  /** Linha que contorna uma imagem (texto ao lado dela): largura útil reduzida. */
+  isSurround?: boolean;
   offsetX?: number;
   elementList: Element[];
 }
@@ -22,6 +27,8 @@ interface WordJustificationRow<Element extends WordJustificationElement> {
 export interface WordJustificationOptions<Element extends WordJustificationElement> {
   innerWidth: number;
   measureElementWidth: (element: Element) => number;
+  /** Escala atual do editor (zoom). Usada p/ a capacidade de letter-spacing em px. */
+  scale?: number;
 }
 
 interface ComputeRowPayload {
@@ -131,7 +138,13 @@ export function redistributeJustificationToWordSpaces<Element extends WordJustif
 
     // O recuo de primeira linha (offsetX) reduz a largura útil da linha: o texto
     // justificado preenche innerWidth - offsetX e fecha exatamente na margem.
-    const rowInnerWidth = Math.max(0, options.innerWidth - (row.offsetX ?? 0));
+    // Linha de CONTORNO: a 1ª "letra" carrega o translateX (intrusão da imagem à
+    // esquerda); o texto vai de translateX até a margem, então descontamos isso —
+    // senão a justificação miraria a largura cheia e estouraria os espaços.
+    const surroundOffset = row.isSurround
+      ? Math.max(0, row.elementList[0]?.left ?? 0)
+      : 0;
+    const rowInnerWidth = Math.max(0, options.innerWidth - (row.offsetX ?? 0) - surroundOffset);
 
     const elements =
       row.elementList[0]?.value === ZERO_WIDTH ? row.elementList.slice(1) : row.elementList;
@@ -155,9 +168,10 @@ export function redistributeJustificationToWordSpaces<Element extends WordJustif
     const extra = rowInnerWidth - leadingTotal - naturalTotal;
     if (extra < 0) continue;
 
+    const scale = options.scale ?? 1;
     const letterCapacities = activeElements.map((element, index) =>
       canExpandAfterLetter(activeElements, index)
-        ? Math.max(0, (element.size ?? 13) * MAX_LETTER_EXTRA_RATIO)
+        ? Math.max(0, (element.size ?? 13) * scale * MAX_LETTER_EXTRA_RATIO)
         : 0
     );
     const totalLetterCapacity = letterCapacities.reduce((sum, width) => sum + width, 0);
@@ -345,10 +359,12 @@ export function installCanvasWordJustificationPatch<Element extends WordJustific
         ? (payload as ComputeRowPayload).innerWidth!
         : draw.getInnerWidth();
 
+    // Escala atual (zoom) lida a cada layout — recuo e justificação precisam dela.
+    const scale = Number(draw.getOptions().scale ?? 1) || 1;
+
     // 1) Recuo de 1ª linha (offsetX) — antes da justificação, que usa o offsetX.
     const indentConfig = options.getFirstLineIndent?.() ?? null;
     if (indentConfig && indentConfig.mm > 0) {
-      const scale = Number(draw.getOptions().scale ?? 1) || 1;
       applyFirstLineIndentToRows(rows, {
         indentPx: mmToPx(indentConfig.mm) * scale,
         auto: indentConfig.auto,
@@ -356,7 +372,7 @@ export function installCanvasWordJustificationPatch<Element extends WordJustific
     }
 
     // 2) Justificação por espaços (lê row.offsetX para fechar na margem).
-    redistributeJustificationToWordSpaces(rows, { innerWidth, measureElementWidth });
+    redistributeJustificationToWordSpaces(rows, { innerWidth, measureElementWidth, scale });
   });
 
   return () => {
@@ -370,15 +386,20 @@ function createCanvasElementMeasurer<Element extends WordJustificationElement>(
   const maybeDraw = draw as CanvasDrawInternal & {
     getElementFont?: (element: Element, scale?: number) => string;
   };
-  const scale = Number(draw.getOptions().scale ?? 1) || 1;
   const canvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
   const ctx = canvas?.getContext('2d') ?? null;
+  // Escala lida A CADA medição (o usuário pode dar zoom depois deste measurer ser
+  // criado): mede o glifo no tamanho LÓGICO e converte para a escala ATUAL, batendo
+  // com as larguras que o computeRowList produziu. Antes ficava congelada no mount →
+  // no zoom as larguras não batiam e a justificação estourava os espaços.
+  const currentScale = () => Number(draw.getOptions().scale ?? 1) || 1;
 
   return createCachedElementWidthMeasurer(
     (element: Element): number => {
       if (!TEXT_TYPES.has(element.type) || !ctx || !maybeDraw.getElementFont) {
         return element.metrics?.width ?? 0;
       }
+      const scale = currentScale();
       ctx.font = maybeDraw.getElementFont(element);
       const value = element.value ?? '';
       const measured = ctx.measureText(value).width * scale;
@@ -392,7 +413,7 @@ function createCanvasElementMeasurer<Element extends WordJustificationElement>(
         maybeDraw.getElementFont(element),
         element.value ?? '',
         element.letterSpacing ?? 0,
-        scale,
+        currentScale(),
       ].join('\u0000');
     }
   );

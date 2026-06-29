@@ -39,6 +39,21 @@ export interface CanvasLayoutGlyph {
   rowFlex?: string;
 }
 
+/** Uma imagem posicionada, como o canvas-editor a desenhou (px, sem zoom). */
+export interface CanvasLayoutImage {
+  pageNo: number;
+  /** x da borda esquerda (px, relativo à página). */
+  x: number;
+  /** y do TOPO da imagem (px, relativo à página). */
+  yTop: number;
+  /** largura desenhada (px). */
+  width: number;
+  /** altura desenhada (px). */
+  height: number;
+  /** dados da imagem (data URL base64: PNG ou JPEG). */
+  dataUrl: string;
+}
+
 export interface CanvasLayoutSnapshot {
   /** largura da página em px (base, sem zoom) — getOriginalWidth(). */
   pageWidthPx: number;
@@ -46,6 +61,8 @@ export interface CanvasLayoutSnapshot {
   pageHeightPx: number;
   pageCount: number;
   glyphs: CanvasLayoutGlyph[];
+  /** imagens em linha/bloco capturadas do layout (opcional p/ compat. de fixtures). */
+  images?: CanvasLayoutImage[];
   skipped: { images: number; tables: number; other: number };
 }
 
@@ -91,12 +108,25 @@ export interface CanvasVectorLine {
   color: string;
 }
 
+/** Uma imagem pronta para desenhar no PDF (pt, origem inferior-esquerda). */
+export interface CanvasVectorImage {
+  /** x do canto inferior-esquerdo (pt). */
+  x: number;
+  /** y do canto inferior-esquerdo (pt, origem inferior-esquerda). */
+  y: number;
+  width: number;
+  height: number;
+  dataUrl: string;
+}
+
 export interface CanvasVectorPage {
   pageNo: number;
   mediaBox: PdfBox;
   trimBox: PdfBox;
   bleedBox: PdfBox;
   runs: CanvasVectorRun[];
+  /** imagens da página (desenhadas antes do texto). Opcional p/ compat. */
+  images?: CanvasVectorImage[];
   marks: CanvasVectorLine[];
 }
 

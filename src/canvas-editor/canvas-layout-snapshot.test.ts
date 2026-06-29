@@ -81,16 +81,33 @@ describe('readCanvasLayoutSnapshot', () => {
     expect(g.fontSizePx).toBe(26);
   });
 
-  it('conta páginas e tipos pulados', () => {
+  it('conta páginas, captura imagens e pula tabelas', () => {
     const positions = [
       { pageNo: 0, value: 'A', ascent: 10, width: 8, x: 64, yTop: 64 },
       { pageNo: 1, value: 'B', ascent: 10, width: 8, x: 64, yTop: 64 },
-      { pageNo: 1, value: ' ', ascent: 10, width: 0, x: 72, yTop: 64 },
+      { pageNo: 1, value: '', ascent: 10, width: 120, x: 72, yTop: 80, height: 90 },
+      { pageNo: 1, value: ' ', ascent: 10, width: 0, x: 80, yTop: 64 },
     ];
-    const elements = [{ value: 'A' }, { value: 'B' }, { value: ' ', type: 'image' }];
+    const elements = [
+      { value: 'A' },
+      { value: 'B' },
+      { value: 'data:image/png;base64,iVBORw0KGgo=', type: 'image' },
+      { value: ' ', type: 'table' },
+    ];
     const snap = readCanvasLayoutSnapshot(fakeDraw(positions, elements));
     expect(snap.pageCount).toBe(2);
-    expect(snap.skipped.images).toBe(1);
     expect(snap.glyphs.map((g) => g.value)).toEqual(['A', 'B']);
+    // imagem agora é CAPTURADA (não pulada) com posição/tamanho reais + base64.
+    expect(snap.skipped.images).toBe(0);
+    expect(snap.skipped.tables).toBe(1);
+    expect(snap.images).toHaveLength(1);
+    expect(snap.images![0]).toMatchObject({
+      pageNo: 1,
+      x: 72,
+      yTop: 80,
+      width: 120,
+      height: 90,
+      dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+    });
   });
 });

@@ -85,6 +85,10 @@ export interface CanvasEditorHandle {
   insertSeparator(dashArray?: number[]): void;
   insertTable(rows: number, cols: number): void;
   insertImage(base64: string, width: number, height: number): void;
+  /** Muda o modo de exibição da imagem clicada: em linha, bloco (acima/abaixo) ou contorno. */
+  setImageDisplay(display: ImageDisplay): void;
+  /** Há uma imagem selecionada/clicada agora? */
+  hasSelectedImage(): boolean;
   insertHyperlink(url: string): void;
   insertBlock(): void;
   insertCheckbox(): void;
@@ -158,6 +162,8 @@ interface CanvasEditorHostProps {
   onFirstLineIndentActiveChange?: (active: boolean) => void;
   /** Notifica a escala do editor (1 = 100%) ao mudar (botões ou ctrl+roda). */
   onPageScaleChange?: (scale: number) => void;
+  /** Notifica quando uma imagem é clicada/selecionada (com a posição do clique). */
+  onImageSelected?: (info: { x: number; y: number } | null) => void;
 }
 
 export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostProps>(
@@ -173,6 +179,7 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       firstLineIndentAuto,
       onFirstLineIndentActiveChange,
       onPageScaleChange,
+      onImageSelected,
     },
     ref
   ) {
@@ -191,6 +198,10 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
     // Callback de escala, via ref (idem) — segue o zoom por botão e por ctrl+roda.
     const notifyScaleRef = useRef<((scale: number) => void) | undefined>(onPageScaleChange);
     notifyScaleRef.current = onPageScaleChange;
+    // Imagem clicada (alvo dos modos de exibição/contorno) + notificação ao shell.
+    const selectedImageRef = useRef<IElement | null>(null);
+    const notifyImageSelectedRef = useRef<typeof onImageSelected>(onImageSelected);
+    notifyImageSelectedRef.current = onImageSelected;
     const notifyIndentActive = useCallback(() => {
       const draw = drawRef.current;
       if (!draw || !notifyIndentRef.current) return;
@@ -277,6 +288,15 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       editor.listener.rangeStyleChange = () => notifyIndentActive();
       // Mantém o % de zoom em sincronia (inclui ctrl+roda, que não passa pelos botões).
       editor.listener.pageScaleChange = (scale: number) => notifyScaleRef.current?.(scale);
+      // Clique numa imagem: guarda o elemento (alvo do contorno) e avisa o shell
+      // com a posição do clique (para a barrinha flutuante de opções da imagem).
+      editor.eventBus.on('imageMousedown', (payload) => {
+        selectedImageRef.current = payload.element ?? null;
+        const evt = payload.evt as MouseEvent | undefined;
+        notifyImageSelectedRef.current?.(
+          evt ? { x: evt.clientX, y: evt.clientY } : { x: 0, y: 0 }
+        );
+      });
       notifyIndentActive(); // estado inicial
       onReady?.();
 
@@ -418,6 +438,16 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       },
       insertImage(base64: string, width: number, height: number) {
         requireEditor(editorRef.current).command.executeImage({ value: base64, width, height });
+      },
+      setImageDisplay(display: ImageDisplay) {
+        const element = selectedImageRef.current;
+        if (!element) return;
+        // executeChangeImageDisplay usa o range atual (que está na imagem clicada)
+        // para ancorar o contorno. Isso reflua o texto ao redor — nativo do motor.
+        requireEditor(editorRef.current).command.executeChangeImageDisplay(element, display);
+      },
+      hasSelectedImage() {
+        return selectedImageRef.current !== null;
       },
       insertHyperlink(url: string) {
         requireEditor(editorRef.current).command.executeHyperlink({ url, valueList: [{ value: url }] });

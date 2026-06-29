@@ -16,8 +16,10 @@ import { mmToPt } from '../canvas-editor/prelo-canvas-units';
 import {
   variantKey,
   type CanvasLayoutGlyph,
+  type CanvasLayoutImage,
   type CanvasLayoutSnapshot,
   type CanvasVectorDocument,
+  type CanvasVectorImage,
   type CanvasVectorLine,
   type CanvasVectorPage,
   type CanvasVectorRun,
@@ -143,12 +145,31 @@ export function snapshotToVectorDocument(
     byPage.set(glyph.pageNo, list);
   }
 
-  const pageCount = Math.max(snapshot.pageCount, byPage.size, 1);
+  // Agrupa imagens por página (mesmo esquema dos glifos).
+  const imagesByPage = new Map<number, CanvasLayoutImage[]>();
+  for (const image of snapshot.images ?? []) {
+    if (!image.dataUrl) continue;
+    const list = imagesByPage.get(image.pageNo) ?? [];
+    list.push(image);
+    imagesByPage.set(image.pageNo, list);
+  }
+
+  const pageCount = Math.max(snapshot.pageCount, byPage.size, imagesByPage.size, 1);
   const pages: CanvasVectorPage[] = [];
 
   for (let pageNo = 0; pageNo < pageCount; pageNo++) {
     const glyphs = byPage.get(pageNo) ?? [];
     const runs: CanvasVectorRun[] = [];
+
+    // Imagens da página: px (topo-esquerda, relativo à página) -> pt (canto
+    // inferior-esquerdo, Y invertido), mesma transformação kx/ky/offset das runs.
+    const images: CanvasVectorImage[] = (imagesByPage.get(pageNo) ?? []).map((img) => ({
+      x: offset + img.x * kx,
+      y: offset + (trimH - (img.yTop + img.height) * ky),
+      width: img.width * kx,
+      height: img.height * ky,
+      dataUrl: img.dataUrl,
+    }));
 
     for (const group of groupGlyphs(glyphs)) {
       const gs = group.glyphs;
@@ -179,7 +200,7 @@ export function snapshotToVectorDocument(
       ? cropMarksFor(trimBox, bleedBox, markLen, markGap, markThickness)
       : [];
 
-    pages.push({ pageNo, mediaBox, trimBox, bleedBox, runs, marks });
+    pages.push({ pageNo, mediaBox, trimBox, bleedBox, runs, images, marks });
   }
 
   return { unit: 'pt', pages, fontFamilies: [...fontFamilies] };
