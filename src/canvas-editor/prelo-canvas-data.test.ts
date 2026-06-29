@@ -1,4 +1,4 @@
-import { ElementType } from '../vendor/canvas-editor';
+import { ElementType, RowFlex } from '../vendor/canvas-editor';
 import { describe, expect, it } from 'vitest';
 import {
   buildCanvasDocument,
@@ -57,6 +57,21 @@ describe('prelo canvas data', () => {
     expect(built.options.width).toBe(559);
     expect(built.options.height).toBe(794);
     expect(built.options.margins).toEqual([64, 53, 64, 64]);
+  });
+
+  it('applies the baseline-grid body style to imported manuscript text', () => {
+    const built = buildCanvasDocument({
+      title: 'Livro',
+      preset: PRELO_CANVAS_PRESETS.a5,
+      manuscript: 'Texto',
+    });
+
+    const bodyElement = built.data.main.find((element) => element.value === 'T');
+    expect(bodyElement).toMatchObject({
+      size: 13,
+      rowFlex: RowFlex.ALIGNMENT,
+      rowMargin: 0.1875,
+    });
   });
 
   it('keeps preset conversion reusable for shell controls', () => {

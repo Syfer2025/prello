@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { AUTO_HYPHEN_VALUE, stripAutoHyphens } from './canvas-hyphenation';
+import {
+  AUTO_HYPHEN_VALUE,
+  candidateHyphenOffsets,
+  stripAutoHyphens,
+} from './canvas-hyphenation';
+import { PRELO_BOOK_TYPOGRAPHY_PROFILE } from './canvas-typography-profile';
 import type { CanvasDrawInternal } from './canvas-draw-internal';
 
 interface El {
@@ -57,6 +62,19 @@ describe('stripAutoHyphens', () => {
 });
 
 describe('applyHyphenation', () => {
+  it('filters candidate hyphen points through the book typography profile', () => {
+    const word = 'extraordinariamente';
+    const offsets = candidateHyphenOffsets(word, PRELO_BOOK_TYPOGRAPHY_PROFILE.hyphenation);
+
+    expect(offsets.length).toBeGreaterThan(0);
+    expect(offsets.every((offset) => offset >= PRELO_BOOK_TYPOGRAPHY_PROFILE.hyphenation.minPrefixLength)).toBe(true);
+    expect(offsets.every((offset) => word.length - offset >= PRELO_BOOK_TYPOGRAPHY_PROFILE.hyphenation.minSuffixLength)).toBe(true);
+  });
+
+  it('does not offer automatic hyphen points for words shorter than the profile minimum', () => {
+    expect(candidateHyphenOffsets('casa', PRELO_BOOK_TYPOGRAPHY_PROFILE.hyphenation)).toEqual([]);
+  });
+
   it('does not mutate or render while a real text selection is active', async () => {
     const { applyHyphenation } = await import('./canvas-hyphenation');
     const list = [el('a'), autoHyphen(), el('b')];

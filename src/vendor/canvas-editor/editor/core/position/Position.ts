@@ -20,12 +20,13 @@ import {
 } from '../../interface/Position'
 import { Draw } from '../draw/Draw'
 import { EditorMode, EditorZone } from '../../dataset/enum/Editor'
-import { deepClone, isRectIntersect } from '../../utils'
+import { deepClone } from '../../utils'
 import { ImageDisplay } from '../../dataset/enum/Common'
 import { DeepRequired } from '../../interface/Common'
 import { EventBus } from '../event/eventbus/EventBus'
 import { EventBusMap } from '../../interface/EventBus'
 import { getIsBlockElement } from '../../utils/element'
+import { resolvePreloImageWrapAction } from './preloImageWrap'
 
 export class Position {
   private cursorPosition: IElementPosition | null
@@ -1028,6 +1029,7 @@ export class Position {
     } = payload
     let x = rowElementRect.x
     let rowIncreaseWidth = 0
+    let rowAvailableWidth = availableWidth
     if (
       surroundElementList.length &&
       !getIsBlockElement(rowElement) &&
@@ -1044,26 +1046,38 @@ export class Position {
           width: surroundElement.width! * scale,
           height: surroundElement.height! * scale
         }
-        if (isRectIntersect(rowElementRect, surroundRect)) {
+        const wrapAction = resolvePreloImageWrapAction({
+          rowElementRect,
+          rowWidth: row.width,
+          availableWidth,
+          surroundRect,
+          surroundElement,
+          scale
+        })
+        if (wrapAction) {
           row.isSurround = true
-          // 需向左移动距离：浮动元素宽度 + 浮动元素左上坐标 - 元素左上坐标
-          const translateX =
-            surroundRect.width + surroundRect.x - rowElementRect.x
-          rowElement.left = translateX
-          // 增加行宽
-          row.width += translateX
-          rowIncreaseWidth += translateX
-          // 下个元素起始位置：浮动元素右坐标 - 元素宽度
-          x = surroundRect.x + surroundRect.width
-          // 检测宽度是否足够，不够则移动到下一行，并还原状态
-          if (row.width + rowElement.metrics.width > availableWidth) {
+          if (wrapAction.kind === 'limit-left') {
+            rowAvailableWidth = Math.min(rowAvailableWidth, wrapAction.availableWidth)
+            row.availableWidth = rowAvailableWidth
             rowElement.left = 0
-            row.width -= rowIncreaseWidth
-            break
+            x = wrapAction.x
+          } else {
+            rowElement.left = wrapAction.rowElementLeft
+            // 增加行宽
+            row.width += wrapAction.rowIncreaseWidth
+            rowIncreaseWidth += wrapAction.rowIncreaseWidth
+            // 下个元素起始位置：浮动元素右坐标 - 元素宽度
+            x = wrapAction.x
+            // 检测宽度是否足够，不够则移动到下一行，并还原状态
+            if (row.width + rowElement.metrics.width > rowAvailableWidth) {
+              rowElement.left = 0
+              row.width -= rowIncreaseWidth
+              break
+            }
           }
         }
       }
     }
-    return { x, rowIncreaseWidth }
+    return { x, rowIncreaseWidth, availableWidth: rowAvailableWidth }
   }
 }

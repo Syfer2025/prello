@@ -12,6 +12,8 @@ import {
   canvasOptionsForBookLayout,
   type BookLayoutSettings,
 } from './book-layout-settings';
+import { computeBaselineGridRowMargin } from './canvas-typography-profile';
+import { getPreloParagraphStyleCanvasMapping } from './prelo-paragraph-styles';
 import type { PreloCanvasBookPreset } from './prelo-canvas-types';
 import { toEmbeddableFamily } from '../fonts/book-fonts';
 
@@ -79,6 +81,10 @@ function pushTitle(target: IElement[], value: string, level: TitleLevel, size: n
 
 function pushParagraphs(target: IElement[], manuscript: string, font: string, size: number) {
   const normalized = manuscript.replace(/\r\n/g, '\n');
+  const bodyStyle = getPreloParagraphStyleCanvasMapping('body');
+  const rowMargin = bodyStyle.baselineGrid
+    ? computeBaselineGridRowMargin(size)
+    : bodyStyle.rowMargin;
   for (const block of normalized.split(/\n{2,}/)) {
     const text = block.trim();
     if (!text) continue;
@@ -88,7 +94,7 @@ function pushParagraphs(target: IElement[], manuscript: string, font: string, si
       continue;
     }
     for (const value of `${text}\n\n`) {
-      target.push({ value, font, size });
+      target.push({ value, font, size, rowFlex: bodyStyle.rowFlex, rowMargin });
     }
   }
 }

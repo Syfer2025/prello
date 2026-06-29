@@ -7,6 +7,7 @@ import {
   redistributeJustificationToWordSpaces,
   toggleFirstLineIndentForSelection,
 } from './canvas-word-justification';
+import { PRELO_BOOK_TYPOGRAPHY_PROFILE } from './canvas-typography-profile';
 import type { CanvasDrawInternal } from './canvas-draw-internal';
 
 interface TestElement {
@@ -14,6 +15,7 @@ interface TestElement {
   metrics: { width: number };
   naturalWidth?: number;
   size?: number;
+  left?: number;
 }
 
 function el(value: string, naturalWidth: number, size = 20): TestElement {
@@ -85,6 +87,62 @@ describe('redistributeJustificationToWordSpaces', () => {
     expect(row.width).toBe(120);
   });
 
+  it('keeps text wrapped beside a left-anchored image justified to the reduced width', () => {
+    const row = {
+      width: 72,
+      rowFlex: 'alignment',
+      isSurround: true,
+      isWidthNotEnough: true,
+      elementList: [{ ...el('A', 10), left: 40 }, el(' ', 5), el('B', 10)],
+    };
+
+    redistributeJustificationToWordSpaces([row], {
+      innerWidth: 120,
+      measureElementWidth: (element) => element.naturalWidth!,
+    });
+
+    expect(row.elementList.map((element) => element.metrics.width)).toEqual([10, 60, 10]);
+    expect(row.width).toBe(80);
+  });
+
+  it('does not stretch split surround rows around a centered image', () => {
+    const row = {
+      width: 170,
+      rowFlex: 'alignment',
+      isSurround: true,
+      isWidthNotEnough: true,
+      elementList: [el('geração', 30), el(' ', 5), { ...el('dependia', 35), left: 100 }],
+    };
+    const beforeWidths = row.elementList.map((element) => element.metrics.width);
+
+    redistributeJustificationToWordSpaces([row], {
+      innerWidth: 220,
+      measureElementWidth: (element) => element.naturalWidth!,
+    });
+
+    expect(row.elementList.map((element) => element.metrics.width)).toEqual(beforeWidths);
+    expect(row.width).toBe(170);
+  });
+
+  it('justifies left-side image wrap rows to their reduced available width', () => {
+    const row = {
+      width: 72,
+      availableWidth: 80,
+      rowFlex: 'alignment',
+      isSurround: true,
+      isWidthNotEnough: true,
+      elementList: [el('A', 10), el(' ', 5), el('B', 10)],
+    };
+
+    redistributeJustificationToWordSpaces([row], {
+      innerWidth: 120,
+      measureElementWidth: (element) => element.naturalWidth!,
+    });
+
+    expect(row.elementList.map((element) => element.metrics.width)).toEqual([10, 60, 10]);
+    expect(row.width).toBe(80);
+  });
+
   it('uses a small amount of intra-word letter spacing before making word spaces huge', () => {
     const row = {
       width: 65,
@@ -109,6 +167,40 @@ describe('redistributeJustificationToWordSpaces', () => {
     const total = row.elementList.reduce((sum, element) => sum + element.metrics.width, 0);
     expect(total).toBeCloseTo(65, 6);
     expect(row.width).toBe(65);
+  });
+
+  it('accepts an editorial profile that trades more justification into controlled letter spacing', () => {
+    const row = {
+      width: 65,
+      rowFlex: 'alignment',
+      elementList: [
+        el('A', 10),
+        el('B', 10),
+        el(' ', 5),
+        el('C', 10),
+        el('D', 10),
+      ],
+    };
+
+    redistributeJustificationToWordSpaces([row], {
+      innerWidth: 65,
+      measureElementWidth: (element) => element.naturalWidth!,
+      typographyProfile: {
+        ...PRELO_BOOK_TYPOGRAPHY_PROFILE,
+        justification: {
+          maxLetterExtraShare: 0.5,
+          maxLetterExtraRatio: 1,
+        },
+      },
+    });
+
+    expect(row.elementList.map((element) => element.metrics.width)).toEqual([
+      15,
+      10,
+      15,
+      15,
+      10,
+    ]);
   });
 
   it('preserves leading spaces (paragraph indent) instead of collapsing them', () => {

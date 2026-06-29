@@ -1,5 +1,9 @@
 import type { CanvasDrawInternal } from './canvas-draw-internal';
 import { mmToPx } from './prelo-canvas-units';
+import {
+  PRELO_BOOK_TYPOGRAPHY_PROFILE,
+  type CanvasTypographyProfile,
+} from './canvas-typography-profile';
 
 interface WordJustificationElement {
   value?: string;
@@ -21,6 +25,8 @@ interface WordJustificationRow<Element extends WordJustificationElement> {
   /** Linha que contorna uma imagem (texto ao lado dela): largura útil reduzida. */
   isSurround?: boolean;
   offsetX?: number;
+  /** Largura útil real da linha quando o contorno limita um lado da imagem. */
+  availableWidth?: number;
   elementList: Element[];
 }
 
@@ -29,6 +35,8 @@ export interface WordJustificationOptions<Element extends WordJustificationEleme
   measureElementWidth: (element: Element) => number;
   /** Escala atual do editor (zoom). Usada p/ a capacidade de letter-spacing em px. */
   scale?: number;
+  /** Perfil editorial que controla a distribuição entre tracking e espaços. */
+  typographyProfile?: CanvasTypographyProfile;
 }
 
 interface ComputeRowPayload {
@@ -51,8 +59,6 @@ interface PatchOptions<Element extends WordJustificationElement> {
 
 const ZERO_WIDTH = '​';
 const WIDTH_EPSILON = 0.5;
-const MAX_LETTER_EXTRA_SHARE = 0.25;
-const MAX_LETTER_EXTRA_RATIO = 0.025;
 const TEXT_TYPES = new Set([undefined, 'text', 'subscript', 'superscript']);
 const WORD_LETTER = /^[A-Za-zªºÀ-ÖØ-öø-ÿ]$/;
 const PRELO_BASE_OFFSET_X = Symbol('preloBaseOffsetX');
@@ -93,12 +99,47 @@ function isJustifiedFlex(flex: string | undefined): boolean {
   return flex === 'justify' || flex === 'alignment';
 }
 
+function rowLayoutElements<Element extends WordJustificationElement>(
+  row: WordJustificationRow<Element>
+): Element[] {
+  return row.elementList[0]?.value === ZERO_WIDTH ? row.elementList.slice(1) : row.elementList;
+}
+
+function surroundLeadingOffset<Element extends WordJustificationElement>(
+  row: WordJustificationRow<Element>
+): number {
+  if (!row.isSurround) return 0;
+  return Math.max(0, rowLayoutElements(row)[0]?.left ?? 0);
+}
+
+function hasInternalSurroundOffset<Element extends WordJustificationElement>(
+  row: WordJustificationRow<Element>
+): boolean {
+  if (!row.isSurround) return false;
+  return rowLayoutElements(row)
+    .slice(1)
+    .some((element) => (element.left ?? 0) > WIDTH_EPSILON);
+}
+
+function isSplitSurroundRow<Element extends WordJustificationElement>(
+  row: WordJustificationRow<Element>
+): boolean {
+  // Imagem no meio da linha: há texto antes dela e outro trecho pulado para a
+  // direita. Essa linha não tem uma única largura útil contínua para justificar.
+  return (
+    row.isSurround === true &&
+    surroundLeadingOffset(row) <= WIDTH_EPSILON &&
+    hasInternalSurroundOffset(row)
+  );
+}
+
 function shouldRedistributeRow<Element extends WordJustificationElement>(
   row: WordJustificationRow<Element>,
   flex: string | undefined,
   innerWidth: number
 ): boolean {
   if (!isJustifiedFlex(flex)) return false;
+  if (isSplitSurroundRow(row)) return false;
   if (flex === 'justify') return true;
   return row.isWidthNotEnough === true || Math.abs(row.width - innerWidth) <= WIDTH_EPSILON;
 }
@@ -141,13 +182,11 @@ export function redistributeJustificationToWordSpaces<Element extends WordJustif
     // Linha de CONTORNO: a 1ª "letra" carrega o translateX (intrusão da imagem à
     // esquerda); o texto vai de translateX até a margem, então descontamos isso —
     // senão a justificação miraria a largura cheia e estouraria os espaços.
-    const surroundOffset = row.isSurround
-      ? Math.max(0, row.elementList[0]?.left ?? 0)
-      : 0;
-    const rowInnerWidth = Math.max(0, options.innerWidth - (row.offsetX ?? 0) - surroundOffset);
+    const surroundOffset = surroundLeadingOffset(row);
+    const baseInnerWidth = row.availableWidth ?? options.innerWidth - (row.offsetX ?? 0);
+    const rowInnerWidth = Math.max(0, baseInnerWidth - surroundOffset);
 
-    const elements =
-      row.elementList[0]?.value === ZERO_WIDTH ? row.elementList.slice(1) : row.elementList;
+    const elements = rowLayoutElements(row);
     const range = contentRange(elements);
     if (!range) continue;
 
@@ -169,13 +208,15 @@ export function redistributeJustificationToWordSpaces<Element extends WordJustif
     if (extra < 0) continue;
 
     const scale = options.scale ?? 1;
+    const justificationProfile =
+      options.typographyProfile?.justification ?? PRELO_BOOK_TYPOGRAPHY_PROFILE.justification;
     const letterCapacities = activeElements.map((element, index) =>
       canExpandAfterLetter(activeElements, index)
-        ? Math.max(0, (element.size ?? 13) * scale * MAX_LETTER_EXTRA_RATIO)
+        ? Math.max(0, (element.size ?? 13) * scale * justificationProfile.maxLetterExtraRatio)
         : 0
     );
     const totalLetterCapacity = letterCapacities.reduce((sum, width) => sum + width, 0);
-    const letterExtraTotal = Math.min(extra * MAX_LETTER_EXTRA_SHARE, totalLetterCapacity);
+    const letterExtraTotal = Math.min(extra * justificationProfile.maxLetterExtraShare, totalLetterCapacity);
     const extraPerSpace = (extra - letterExtraTotal) / expandableSpaces.length;
 
     elements.forEach((element, index) => {

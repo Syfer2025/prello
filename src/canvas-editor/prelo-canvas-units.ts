@@ -8,6 +8,10 @@ export function mmToPx(mm: number): number {
   return Math.round((mm / MM_PER_INCH) * PX_PER_INCH);
 }
 
+export function pxToMm(px: number): number {
+  return (px / PX_PER_INCH) * MM_PER_INCH;
+}
+
 export function mmToPt(mm: number): number {
   return (mm / MM_PER_INCH) * PT_PER_INCH;
 }

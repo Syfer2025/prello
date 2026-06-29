@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CanvasEditorHost,
   type CanvasEditorHandle,
+  type CanvasImageSelectionInfo,
+  type CanvasImageWrapSettings,
   RowFlex,
-  TitleLevel,
   ListType,
   ListStyle,
   ImageDisplay,
@@ -30,6 +31,12 @@ import {
   buildCanvasDocument,
   type BuiltCanvasDocument,
 } from '../canvas-editor/prelo-canvas-data';
+import {
+  PRELO_PARAGRAPH_STYLE_LIST,
+  getPreloParagraphStyleCanvasMapping,
+  preloStyleToTitleLevel,
+  type PreloParagraphStyleId,
+} from '../canvas-editor/prelo-paragraph-styles';
 import type { PreloCanvasBookPreset } from '../canvas-editor/prelo-canvas-types';
 import {
   PRELO_CANVAS_PRESET_LIST,
@@ -43,6 +50,10 @@ import {
   type CanvasPrintExportReport,
   type PreflightStatus,
 } from '../print-export/canvas-raster-print-export';
+import {
+  analyzeCanvasTypography,
+  type TypographicPreflightReport,
+} from '../print-export/canvas-typographic-preflight';
 import { exportCanvasVectorPdfFromSnapshot } from '../print-export/canvas-vector-pdf-export';
 import {
   BOOK_FONT_FAMILIES,
@@ -51,6 +62,7 @@ import {
   preloadBookFonts,
 } from '../fonts/book-fonts';
 import { LONG_PORTUGUESE_MANUSCRIPT } from '../fixtures/long-portuguese-manuscript';
+import { createPngAlphaContourFromDataUrl } from '../canvas-editor/png-alpha-contour';
 
 /** Apenas fontes de livro EMBUTÍVEIS (sistema não embute com segurança). */
 const FONT_FAMILIES = BOOK_FONT_FAMILIES;
@@ -117,6 +129,7 @@ const TOOLTIPS = {
   exportPdf: 'Exporta o livro em PDF raster a 300 DPI. Nao e PDF/X, CMYK, ICC nem texto selecionavel.',
   exportVector: 'Gera PDF/X-1a CMYK com texto vetorial, sangria de 3 mm e marcas de corte pelo Ghostscript local. Se o endpoint local falhar, baixa o PDF vetorial sem conversao PDF/X.',
   preflight: 'Status honesto do que a exportacao raster entrega e do que ainda falta para grafica profissional.',
+  typographicPreflight: 'Analisa o layout renderizado para encontrar problemas tipograficos antes do PDF final.',
   print: 'Abre a impressao nativa do navegador para o documento.',
   save: 'Salva o projeto atual no armazenamento local do navegador.',
   pairView: 'Mostra duas paginas lado a lado para revisar o livro.',
@@ -252,12 +265,36 @@ function loadInitialCanvasShellState(): CanvasShellState {
 }
 
 type ExportStatus = 'idle' | 'generating' | 'ready' | 'vectorOnly' | 'error';
+type TypographicPreflightUiStatus = 'idle' | 'running' | 'ready' | 'error';
+
+type ImageBarState = CanvasImageSelectionInfo;
+
+const IMAGE_WRAP_SIDE_OPTIONS: Array<{ value: CanvasImageWrapSettings['side']; label: string }> = [
+  { value: 'largest', label: 'Melhor lado' },
+  { value: 'both', label: 'Direito e esquerdo' },
+  { value: 'right', label: 'Lado direito' },
+  { value: 'left', label: 'Lado esquerdo' },
+];
+
+const IMAGE_WRAP_SHAPE_OPTIONS: Array<{ value: CanvasImageWrapSettings['shape']; label: string }> = [
+  { value: 'png-alpha', label: 'PNG transparente' },
+  { value: 'box', label: 'Caixa delimitadora' },
+];
 
 const PREFLIGHT_STATUS_LABEL: Record<PreflightStatus, string> = {
   ok: 'OK',
   pending: 'Pendente',
   blocked: 'Falhou',
 };
+
+const TYPOGRAPHIC_ISSUE_LABELS = {
+  looseJustifiedLine: 'Linha frouxa',
+  hyphenLadder: 'Escada de hifens',
+  pageBottomHyphen: 'Hifen no fim da pagina',
+  imageWrapNarrowLine: 'Contorno estreito',
+} as const;
+
+const TYPOGRAPHIC_ISSUE_PREVIEW_LIMIT = 6;
 
 interface CanvasEditorShellProps {
   onBack?: () => void;
@@ -271,6 +308,8 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   const [pageCount, setPageCount] = useState(0);
   const [exportStatus, setExportStatus] = useState<ExportStatus>('idle');
   const [printReport, setPrintReport] = useState<CanvasPrintExportReport | null>(null);
+  const [typographyReport, setTypographyReport] = useState<TypographicPreflightReport | null>(null);
+  const [typographyStatus, setTypographyStatus] = useState<TypographicPreflightUiStatus>('idle');
   const [vectorStatus, setVectorStatus] = useState<ExportStatus>('idle');
   const [searchQuery, setSearchQuery] = useState('');
   const [replaceText, setReplaceText] = useState('');
@@ -279,8 +318,8 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   const [watermarkText, setWatermarkText] = useState('');
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showLargeExportWarn, setShowLargeExportWarn] = useState(false);
-  // Barrinha flutuante de opções da imagem clicada (posição do clique na tela).
-  const [imageBar, setImageBar] = useState<{ x: number; y: number } | null>(null);
+  // Imagem selecionada no editor; o painel lateral usa estes dados para editar o contorno.
+  const [imageBar, setImageBar] = useState<ImageBarState | null>(null);
 
   useEffect(() => {
     if (state.dirty) {
@@ -293,6 +332,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   }, [state.dirty]);
   const [wordCount, setWordCount] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [selectedParagraphStyleId, setSelectedParagraphStyleId] = useState<PreloParagraphStyleId>('body');
   // Visualização "lado a lado" = pré-visualização SÓ LEITURA em spread (livro
   // aberto). O canvas-editor posiciona cursor/seleção numa única coluna vertical;
   // espalhar as páginas em colunas com CSS quebrava todo o clique/cursor. Aqui
@@ -324,7 +364,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
 
   const [catalog, setCatalog] = useState<ICatalog | null>(null);
 
-  type RightTab = 'page' | 'margins' | 'search' | 'watermark' | 'export' | 'stats';
+  type RightTab = 'page' | 'image' | 'margins' | 'search' | 'watermark' | 'export' | 'stats';
   const [activeRightTab, setActiveRightTab] = useState<RightTab | null>('page');
   
   const handleRightTabClick = (tab: RightTab) => {
@@ -519,6 +559,8 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
 
   const handleChange = useCallback(() => {
     setState((current) => (current.dirty ? current : { ...current, dirty: true }));
+    setTypographyReport(null);
+    setTypographyStatus('idle');
     scheduleWordCount();
   }, [scheduleWordCount]);
 
@@ -652,8 +694,13 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
     setState((current) => ({ ...current, dirty: true }));
   }
 
-  function handleTitleLevel(level: TitleLevel | null) {
-    editorRef.current?.setTitleLevel(level);
+  function handleParagraphStyle(styleId: PreloParagraphStyleId) {
+    setSelectedParagraphStyleId(styleId);
+    const mapping = getPreloParagraphStyleCanvasMapping(styleId);
+    editorRef.current?.setTitleLevel(preloStyleToTitleLevel(styleId));
+    if (mapping.fontSize !== undefined) editorRef.current?.setFontSize(mapping.fontSize);
+    if (mapping.rowFlex !== undefined) editorRef.current?.setRowFlex(mapping.rowFlex);
+    if (mapping.rowMargin !== undefined) editorRef.current?.setRowMargin(mapping.rowMargin);
     setState((current) => ({ ...current, dirty: true }));
   }
 
@@ -700,6 +747,15 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
 
   function handleInsertTable() { editorRef.current?.insertTable(tableRows, tableCols); setState((c) => ({ ...c, dirty: true })); }
 
+  function handleOpenImagePicker() {
+    fileInputRef.current?.click();
+  }
+
+  function handleImageSelectionChange(imageInfo: CanvasImageSelectionInfo | null) {
+    setImageBar(imageInfo);
+    if (imageInfo) setActiveRightTab('image');
+  }
+
   function handleImageSelect(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -710,8 +766,12 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
     reader.onload = () => {
       clearTimeout(abortTimeout);
       const base64 = reader.result as string;
-      editorRef.current?.insertImage(base64, 400, 300);
-      setState((current) => ({ ...current, dirty: true }));
+      void (async () => {
+        const pngAlphaContour = await createPngAlphaContourFromDataUrl(base64).catch(() => null);
+        editorRef.current?.insertImage(base64, 400, 300, { pngAlphaContour });
+        setActiveRightTab('image');
+        setState((current) => ({ ...current, dirty: true }));
+      })();
     };
     reader.onerror = () => {
       clearTimeout(abortTimeout);
@@ -800,8 +860,26 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
 
   // Aplica o modo de exibição à imagem clicada (em linha / acima-abaixo / contorno).
   function applyImageDisplay(display: ImageDisplay) {
-    editorRef.current?.setImageDisplay(display);
-    setImageBar(null);
+    const wrap = imageBar?.wrap;
+    editorRef.current?.setImageDisplay(display, display === ImageDisplay.SURROUND ? wrap : undefined);
+    if (imageBar) {
+      setImageBar({ ...imageBar, display });
+    }
+    setState((current) => ({ ...current, dirty: true }));
+    window.setTimeout(refreshWordCount, 0);
+  }
+
+  function handleImageWrapSettingsChange(settings: Partial<CanvasImageWrapSettings>) {
+    if (!imageBar) return;
+    const nextWrap: CanvasImageWrapSettings = {
+      ...imageBar.wrap,
+      ...settings,
+    };
+    if (nextWrap.shape === 'png-alpha' && !imageBar.hasPngAlphaContour) {
+      nextWrap.shape = 'box';
+    }
+    editorRef.current?.setImageWrapSettings(nextWrap);
+    setImageBar({ ...imageBar, display: ImageDisplay.SURROUND, wrap: nextWrap });
     setState((current) => ({ ...current, dirty: true }));
     window.setTimeout(refreshWordCount, 0);
   }
@@ -810,6 +888,23 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
   function handleOpenPageFromSpread(pageNo: number) {
     pendingJumpPageRef.current = pageNo;
     closePairView(); // o efeito acima rola até a página após o overlay desmontar
+  }
+
+  function handleRunTypographicPreflight() {
+    setTypographyStatus('running');
+    try {
+      const snapshot = editorRef.current?.getLayoutSnapshot() ?? null;
+      if (!snapshot || snapshot.glyphs.length === 0) {
+        throw new Error('Snapshot do canvas indisponível para preflight tipográfico.');
+      }
+      setTypographyReport(analyzeCanvasTypography(snapshot));
+      setTypographyStatus('ready');
+      setActiveRightTab('export');
+    } catch (error) {
+      console.error('Erro ao analisar tipografia do layout:', error);
+      setTypographyReport(null);
+      setTypographyStatus('error');
+    }
   }
 
   function handleExportPdf() {
@@ -862,6 +957,8 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
       if (!snapshot || snapshot.glyphs.length === 0) {
         throw new Error('Snapshot do canvas indisponível para exportação vetorial fiel.');
       }
+      setTypographyReport(analyzeCanvasTypography(snapshot));
+      setTypographyStatus('ready');
       const fonts = await loadFontSourceMap(snapshot.glyphs.map((g) => g.fontFamily));
       const result = await exportCanvasVectorPdfFromSnapshot({
         snapshot,
@@ -1019,14 +1116,21 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
                 onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === 'paraStyle' ? null : 'paraStyle'); }}
                 data-tooltip={activeDropdown === 'paraStyle' ? undefined : 'Estilo de parágrafo'}
               >
-                Texto Normal ▾
+                {PRELO_PARAGRAPH_STYLE_LIST.find((style) => style.id === selectedParagraphStyleId)?.label ?? 'Corpo'} ▾
               </button>
               {activeDropdown === 'paraStyle' && (
                 <div className="canvas-dropdown-menu">
-                  <button type="button" className="canvas-dropdown-item" onClick={() => { setActiveDropdown(null); handleTitleLevel(null); }}>Texto Normal</button>
-                  <button type="button" className="canvas-dropdown-item" onClick={() => { setActiveDropdown(null); handleTitleLevel(TitleLevel.FIRST); }}>Capítulo</button>
-                  <button type="button" className="canvas-dropdown-item" onClick={() => { setActiveDropdown(null); handleTitleLevel(TitleLevel.SECOND); }}>Seção</button>
-                  <button type="button" className="canvas-dropdown-item" onClick={() => { setActiveDropdown(null); handleTitleLevel(TitleLevel.THIRD); }}>Subseção</button>
+                  {PRELO_PARAGRAPH_STYLE_LIST.map((style) => (
+                    <button
+                      key={style.id}
+                      type="button"
+                      className={`canvas-dropdown-item ${selectedParagraphStyleId === style.id ? 'active' : ''}`}
+                      onClick={() => { setActiveDropdown(null); handleParagraphStyle(style.id); }}
+                      data-tooltip={style.description}
+                    >
+                      {style.label}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -1140,8 +1244,6 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
 
           {/* 5. Insertions */}
           <div className="canvas-editor-btn-group advanced-toolbar-group">
-            <button type="button" className="tb-icon-btn" onClick={() => fileInputRef.current?.click()} data-tooltip={TOOLTIPS.insertImage} aria-label={TOOLTIPS.insertImage}><ImageIcon /></button>
-            <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml,image/gif" onChange={handleImageSelect} style={{ display: 'none' }} />
             <label className="canvas-editor-toolbar-field" style={{ gap: '2px', marginLeft: '4px', display: 'flex', alignItems: 'center' }}>
               <input type="number" min={1} max={20} className="canvas-editor-input-number" value={tableRows} onChange={(e) => setTableRows(Number(e.target.value))} style={{ width: 28 }} data-tooltip={TOOLTIPS.tableRows} />
               <span style={{ color: 'var(--text-muted)' }}>×</span>
@@ -1333,7 +1435,7 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
               firstLineIndentAuto={firstLineIndentAuto}
               onFirstLineIndentActiveChange={setFirstLineIndentActive}
               onPageScaleChange={handlePageScaleChange}
-              onImageSelected={setImageBar}
+              onImageSelected={handleImageSelectionChange}
             />
           </main>
 
@@ -1486,6 +1588,127 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
                     </div>
                   </div>
                 </div>
+              )}
+
+              {activeRightTab === 'image' && (
+                <>
+                  <div className="canvas-sidebar-card">
+                    <h3 className="canvas-sidebar-title">Imagem</h3>
+                    <button
+                      type="button"
+                      className="canvas-action-btn btn-save canvas-image-insert-btn"
+                      onClick={handleOpenImagePicker}
+                      data-tooltip={TOOLTIPS.insertImage}
+                    >
+                      <ImageIcon /> Inserir imagem
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml,image/gif"
+                      onChange={handleImageSelect}
+                      style={{ display: 'none' }}
+                    />
+                  </div>
+
+                  <div className="canvas-sidebar-card">
+                    <h3 className="canvas-sidebar-title">Texto em contorno</h3>
+                    {imageBar ? (
+                      <div className="canvas-image-sidebar-panel">
+                        <div className="canvas-image-mode-grid" aria-label="Modo da imagem">
+                          <button
+                            type="button"
+                            className={`canvas-image-mode-btn ${imageBar.display === ImageDisplay.INLINE ? 'active' : ''}`}
+                            onClick={() => applyImageDisplay(ImageDisplay.INLINE)}
+                            data-tooltip="Imagem em linha com o texto"
+                          >
+                            Em linha
+                          </button>
+                          <button
+                            type="button"
+                            className={`canvas-image-mode-btn ${imageBar.display === ImageDisplay.BLOCK ? 'active' : ''}`}
+                            onClick={() => applyImageDisplay(ImageDisplay.BLOCK)}
+                            data-tooltip="Texto acima e abaixo da imagem"
+                          >
+                            Acima/abaixo
+                          </button>
+                          <button
+                            type="button"
+                            className={`canvas-image-mode-btn ${imageBar.display === ImageDisplay.SURROUND ? 'active' : ''}`}
+                            onClick={() => applyImageDisplay(ImageDisplay.SURROUND)}
+                            data-tooltip="Texto contorna a imagem"
+                          >
+                            Contornar texto
+                          </button>
+                          <button
+                            type="button"
+                            className={`canvas-image-mode-btn ${imageBar.display === ImageDisplay.FLOAT_TOP ? 'active' : ''}`}
+                            onClick={() => applyImageDisplay(ImageDisplay.FLOAT_TOP)}
+                            data-tooltip="Imagem na frente do texto"
+                          >
+                            Na frente
+                          </button>
+                          <button
+                            type="button"
+                            className={`canvas-image-mode-btn ${imageBar.display === ImageDisplay.FLOAT_BOTTOM ? 'active' : ''}`}
+                            onClick={() => applyImageDisplay(ImageDisplay.FLOAT_BOTTOM)}
+                            data-tooltip="Imagem atrás do texto"
+                          >
+                            Atrás
+                          </button>
+                        </div>
+
+                        <div className="canvas-image-wrap-sidebar">
+                          <div className="canvas-sidebar-field">
+                            <label htmlFor="imageWrapSideSelect">Ajustar</label>
+                            <select
+                              id="imageWrapSideSelect"
+                              value={imageBar.wrap.side}
+                              onChange={(event) => handleImageWrapSettingsChange({ side: event.target.value as CanvasImageWrapSettings['side'] })}
+                              disabled={imageBar.display !== ImageDisplay.SURROUND}
+                            >
+                              {IMAGE_WRAP_SIDE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="canvas-sidebar-field">
+                            <label htmlFor="imageWrapShapeSelect">Tipo</label>
+                            <select
+                              id="imageWrapShapeSelect"
+                              value={imageBar.wrap.shape}
+                              onChange={(event) => handleImageWrapSettingsChange({ shape: event.target.value as CanvasImageWrapSettings['shape'] })}
+                              disabled={imageBar.display !== ImageDisplay.SURROUND}
+                            >
+                              {IMAGE_WRAP_SHAPE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value} disabled={option.value === 'png-alpha' && !imageBar.hasPngAlphaContour}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="canvas-sidebar-field">
+                            <label htmlFor="imageWrapPaddingField">Distância (mm)</label>
+                            <input
+                              id="imageWrapPaddingField"
+                              type="number"
+                              min={0}
+                              max={30}
+                              step={0.5}
+                              value={imageBar.wrap.paddingMm}
+                              onChange={(event) => handleImageWrapSettingsChange({ paddingMm: Number(event.target.value) })}
+                              disabled={imageBar.display !== ImageDisplay.SURROUND}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="canvas-sidebar-note">Selecione uma imagem no documento para ajustar o contorno.</p>
+                    )}
+                  </div>
+                </>
               )}
 
               {activeRightTab === 'page' && (
@@ -1681,6 +1904,67 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
                     ))}
                   </ul>
 
+                  <div className="canvas-typography-preflight">
+                    <div className="canvas-preflight-section-head">
+                      <h4>Preflight Tipográfico</h4>
+                      <button
+                        type="button"
+                        className="canvas-mini-action-btn"
+                        onClick={handleRunTypographicPreflight}
+                        disabled={!editorReady || typographyStatus === 'running'}
+                        data-tooltip={TOOLTIPS.typographicPreflight}
+                      >
+                        <SearchIcon /> {typographyStatus === 'running' ? 'Analisando...' : 'Analisar tipografia'}
+                      </button>
+                    </div>
+
+                    {typographyStatus === 'error' ? (
+                      <p className="canvas-export-msg status-blocked">
+                        Não foi possível analisar o layout atual.
+                      </p>
+                    ) : typographyReport ? (
+                      <>
+                        <p className="canvas-preflight-note">
+                          {typographyReport.issues.length === 0
+                            ? `OK: ${typographyReport.checkedLineCount} linha(s) analisada(s).`
+                            : `${typographyReport.warningCount} aviso(s) em ${typographyReport.checkedLineCount} linha(s) analisada(s).`}
+                        </p>
+                        <p
+                          className="canvas-preflight-note"
+                          data-tooltip={`espaço ${typographyReport.composition.subScores.wordSpacing} · tracking ${typographyReport.composition.subScores.tracking} · hifens ${typographyReport.composition.subScores.hyphenation} · última linha ${typographyReport.composition.subScores.lastLine} · densidade ${typographyReport.composition.subScores.density}`}
+                        >
+                          Composição: <strong>{typographyReport.composition.score}/100</strong>
+                          {typographyReport.composition.worst.length
+                            ? ` — ${typographyReport.composition.worst.length} ponto(s) crítico(s)`
+                            : ' — sem pontos críticos'}
+                        </p>
+                        {typographyReport?.issues.length ? (
+                          <ul className="canvas-typography-issue-list">
+                            {typographyReport.issues.slice(0, TYPOGRAPHIC_ISSUE_PREVIEW_LIMIT).map((issue) => (
+                              <li key={issue.id} className="canvas-typography-issue" data-tooltip={issue.detail}>
+                                <span className="canvas-preflight-badge status-pending">Aviso</span>
+                                <span className="canvas-typography-issue-text">
+                                  <strong>{TYPOGRAPHIC_ISSUE_LABELS[issue.type]}</strong>
+                                  <span>Pág. {issue.pageNo}, linha {issue.lineNo}</span>
+                                  <em>{issue.lineText}</em>
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {typographyReport.issues.length > TYPOGRAPHIC_ISSUE_PREVIEW_LIMIT ? (
+                          <p className="canvas-preflight-note">
+                            +{typographyReport.issues.length - TYPOGRAPHIC_ISSUE_PREVIEW_LIMIT} aviso(s) oculto(s).
+                          </p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="canvas-preflight-note">
+                        Clique para analisar hifens, espaços de justificação e contornos de imagem no layout atual.
+                      </p>
+                    )}
+                  </div>
+
                   <div className="canvas-export-actions" style={{ marginTop: '16px' }}>
                     <button
                       type="button"
@@ -1735,6 +2019,15 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
               aria-label="Abrir formatos e dimensões"
             >
               <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line></svg>
+            </button>
+            <button
+              type="button"
+              className={`sidebar-strip-btn ${activeRightTab === 'image' ? 'active' : ''}`}
+              onClick={() => handleRightTabClick('image')}
+              data-tooltip="Imagem e Contorno"
+              aria-label="Abrir imagem e contorno"
+            >
+              <ImageIcon />
             </button>
             <button
               type="button"
@@ -1910,20 +2203,6 @@ export default function CanvasEditorShell({ onBack, onPersistProject }: CanvasEd
               <button type="button" className="canvas-action-btn btn-pdf" onClick={() => setShowSettingsModal(false)}>Fechar</button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ── Exit Confirmation Modal ── */}
-      {imageBar && (
-        <div
-          className="canvas-image-bar"
-          style={{ position: 'fixed', left: imageBar.x, top: Math.max(8, imageBar.y - 48), zIndex: 1200 }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button type="button" className="canvas-image-bar-btn" onClick={() => applyImageDisplay(ImageDisplay.INLINE)} data-tooltip="Imagem em linha com o texto">Em linha</button>
-          <button type="button" className="canvas-image-bar-btn" onClick={() => applyImageDisplay(ImageDisplay.BLOCK)} data-tooltip="Texto acima e abaixo da imagem">Acima/abaixo</button>
-          <button type="button" className="canvas-image-bar-btn" onClick={() => applyImageDisplay(ImageDisplay.SURROUND)} data-tooltip="Texto contorna a imagem">Contornar texto</button>
-          <button type="button" className="canvas-image-bar-close" onClick={() => setImageBar(null)} aria-label="Fechar opções da imagem">×</button>
         </div>
       )}
 

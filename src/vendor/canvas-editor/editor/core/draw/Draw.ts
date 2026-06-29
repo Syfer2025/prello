@@ -1997,6 +1997,10 @@ export class Draw {
       })
       x = surroundPosition.x
       curRowWidth += surroundPosition.rowIncreaseWidth
+      const rowAvailableWidth = surroundPosition.availableWidth ?? availableWidth
+      if (rowAvailableWidth < availableWidth) {
+        curRow.availableWidth = rowAvailableWidth
+      }
       x += metrics.width
       // 是否强制换行
       const isForceBreak =
@@ -2015,7 +2019,7 @@ export class Draw {
           preElement?.controlComponent === ControlComponent.VALUE) ||
         (i !== 0 && element.value === ZERO && !element.area?.hide)
       // 是否宽度不足导致换行
-      const isWidthNotEnough = curRowWidth > availableWidth
+      const isWidthNotEnough = curRowWidth > rowAvailableWidth
       const isWrap = isForceBreak || isWidthNotEnough
       // 新行数据处理
       if (isWrap) {
@@ -2110,12 +2114,12 @@ export class Draw {
               ? curRow.elementList.slice(1)
               : curRow.elementList
           const gap =
-            (availableWidth - curRow.width) / (rowElementList.length - 1)
+            (rowAvailableWidth - curRow.width) / (rowElementList.length - 1)
           for (let e = 0; e < rowElementList.length - 1; e++) {
             const el = rowElementList[e]
             el.metrics.width += gap
           }
-          curRow.width = availableWidth
+          curRow.width = rowAvailableWidth
         }
       }
       // 重新计算坐标、页码、下一行首行元素环绕交叉

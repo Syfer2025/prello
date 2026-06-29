@@ -9,6 +9,7 @@ const appShellSource = readFileSync(join(process.cwd(), 'src/product/AppShell.ts
 const canvasShellSource = readFileSync(join(process.cwd(), 'src/product/CanvasEditorShell.tsx'), 'utf8');
 const hostSource = readFileSync(join(process.cwd(), 'src/canvas-editor/CanvasEditorHost.tsx'), 'utf8');
 const productCssSource = readFileSync(join(process.cwd(), 'src/product/product.css'), 'utf8');
+const vendorPositionSource = readFileSync(join(process.cwd(), 'src/vendor/canvas-editor/editor/core/position/Position.ts'), 'utf8');
 const vendorIndexPath = join(process.cwd(), 'src/vendor/canvas-editor/index.ts');
 const vendorEditorPath = join(process.cwd(), 'src/vendor/canvas-editor/editor/index.ts');
 const vendorIndexSource = existsSync(vendorIndexPath) ? readFileSync(vendorIndexPath, 'utf8') : '';
@@ -131,6 +132,32 @@ describe('canvas editor product integration', () => {
     expect(canvasShellSource).toContain('Preflight');
   });
 
+  it('runs typographic preflight from the faithful canvas layout snapshot without mutating export output', () => {
+    expect(canvasShellSource).toContain('analyzeCanvasTypography');
+    expect(canvasShellSource).toContain('handleRunTypographicPreflight');
+    expect(canvasShellSource).toContain('setTypographyReport(analyzeCanvasTypography(snapshot))');
+    expect(canvasShellSource).toContain('Preflight Tipográfico');
+    expect(canvasShellSource).toContain('Analisar tipografia');
+    expect(canvasShellSource).toContain('typographyReport?.issues');
+    expect(canvasShellSource).toContain('getLayoutSnapshot()');
+  });
+
+  it('drives paragraph style UI from Prelo semantic paragraph styles', () => {
+    expect(canvasShellSource).toContain('PRELO_PARAGRAPH_STYLE_LIST');
+    expect(canvasShellSource).toContain('getPreloParagraphStyleCanvasMapping');
+    expect(canvasShellSource).toContain('preloStyleToTitleLevel');
+    expect(canvasShellSource).toContain('handleParagraphStyle');
+    expect(canvasShellSource).toContain('selectedParagraphStyleId');
+    expect(canvasShellSource).toContain('PRELO_PARAGRAPH_STYLE_LIST.map');
+    expect(canvasShellSource).toContain('const mapping = getPreloParagraphStyleCanvasMapping(styleId)');
+    expect(canvasShellSource).toContain('editorRef.current?.setFontSize(mapping.fontSize)');
+    expect(canvasShellSource).toContain('editorRef.current?.setRowFlex(mapping.rowFlex)');
+    expect(canvasShellSource).toContain('editorRef.current?.setRowMargin(mapping.rowMargin)');
+    expect(canvasShellSource).not.toContain('handleTitleLevel(TitleLevel.FIRST)');
+    expect(canvasShellSource).not.toContain('handleTitleLevel(TitleLevel.SECOND)');
+    expect(canvasShellSource).not.toContain('handleTitleLevel(TitleLevel.THIRD)');
+  });
+
   it('labels the export action as raster 300 DPI instead of print-ready final', () => {
     expect(canvasShellSource).toMatch(/300 DPI \(raster\)/i);
   });
@@ -242,7 +269,7 @@ describe('canvas editor product integration', () => {
     expect(canvasShellSource).toContain("type LeftTab = 'chapters' | 'pages';");
     expect(canvasShellSource).toContain("const [activeLeftTab, setActiveLeftTab] = useState<LeftTab | null>('chapters');");
     expect(canvasShellSource).toContain("setActiveLeftTab(current => current === tab ? null : tab)");
-    expect(canvasShellSource).toContain("type RightTab = 'page' | 'margins' | 'search' | 'watermark' | 'export' | 'stats';");
+    expect(canvasShellSource).toContain("type RightTab = 'page' | 'image' | 'margins' | 'search' | 'watermark' | 'export' | 'stats';");
     expect(canvasShellSource).toContain("const [activeRightTab, setActiveRightTab] = useState<RightTab | null>('page');");
     expect(canvasShellSource).toContain("setActiveRightTab(current => current === tab ? null : tab)");
     expect(canvasShellSource).not.toContain("activeLeftTab === 'all' ||");
@@ -277,6 +304,31 @@ describe('canvas editor product integration', () => {
     expect(hostSource).toContain('editor.listener.rangeStyleChange');
     expect(hostSource).not.toContain('__PRELO_DRAW__');
     expect(hostSource).not.toContain('__PRELO_EDITOR__');
+  });
+
+  it('uses PNG alpha data for image text wrap instead of only the image rectangle', () => {
+    expect(canvasShellSource).toContain('createPngAlphaContourFromDataUrl');
+    expect(canvasShellSource).toContain('insertImage(base64, 400, 300, { pngAlphaContour })');
+    expect(canvasShellSource).toContain("activeRightTab === 'image'");
+    expect(canvasShellSource).toContain('Inserir imagem');
+    expect(canvasShellSource).toContain('Ajustar');
+    expect(canvasShellSource).toContain('Tipo');
+    expect(canvasShellSource).toContain('Distância');
+    expect(canvasShellSource).toContain('Na frente');
+    expect(canvasShellSource).toContain('Atrás');
+    expect(canvasShellSource).toContain('handleImageWrapSettingsChange');
+    expect(canvasShellSource).toContain('setImageBar({ ...imageBar, display });');
+    expect(canvasShellSource).not.toContain('setImageBar(null);');
+    expect(canvasShellSource).not.toContain('className="canvas-image-bar"');
+    expect(canvasShellSource).not.toContain("style={{ position: 'fixed', left: imageBar.x");
+    expect(canvasShellSource).not.toContain('onClick={() => fileInputRef.current?.click()} data-tooltip={TOOLTIPS.insertImage}');
+    expect(hostSource).toContain('pngAlphaContour');
+    expect(hostSource).toContain('preloImageWrap');
+    expect(hostSource).toContain('setImageWrapSettings');
+    expect(hostSource).toContain('CanvasImageWrapSettings');
+    expect(hostSource).toContain('executeSetRange');
+    expect(vendorPositionSource).toContain('resolvePreloImageWrapAction');
+    expect(vendorPositionSource).toContain('row.availableWidth');
   });
 
   it('does not promise title-aware indent behavior before that rule exists', () => {

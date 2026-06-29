@@ -31,7 +31,18 @@ import {
   createCanvasParagraphBreakElements,
   shouldHandleParagraphEnter,
 } from './canvas-paragraph-break';
+import { installCanvasPasteReflow } from './canvas-paste-reflow';
+import { computeBaselineGridRowMargin } from './canvas-typography-profile';
+import { getPreloParagraphStyleCanvasMapping } from './prelo-paragraph-styles';
 import type { CanvasLayoutSnapshot } from '../print-export/canvas-vector-types';
+import {
+  createPreloImageWrapExtension,
+  type PngAlphaContour,
+  type PreloImageWrapExtension,
+  type PreloImageWrapShape,
+  type PreloImageWrapSide,
+} from './png-alpha-contour';
+import { mmToPx, pxToMm } from './prelo-canvas-units';
 
 export {
   RowFlex,
@@ -49,6 +60,32 @@ export {
 export type { ICatalog };
 
 type GetImagePayload = Parameters<Editor['command']['getImage']>[0];
+
+export interface CanvasInsertImageOptions {
+  pngAlphaContour?: PngAlphaContour | null;
+}
+
+export interface CanvasImageWrapSettings {
+  side: PreloImageWrapSide;
+  shape: PreloImageWrapShape;
+  paddingMm: number;
+}
+
+export interface CanvasImageSelectionInfo {
+  x: number;
+  y: number;
+  display: ImageDisplay;
+  wrap: CanvasImageWrapSettings;
+  hasPngAlphaContour: boolean;
+}
+
+type PreloImageElementExtension = {
+  preloImageWrap?: PreloImageWrapExtension;
+};
+
+type PreloImageElement = IElement & {
+  extension?: PreloImageElementExtension;
+};
 
 export interface CanvasEditorHandle {
   getValue(): IEditorResult;
@@ -84,9 +121,11 @@ export interface CanvasEditorHandle {
   insertPageBreak(): void;
   insertSeparator(dashArray?: number[]): void;
   insertTable(rows: number, cols: number): void;
-  insertImage(base64: string, width: number, height: number): void;
+  insertImage(base64: string, width: number, height: number, options?: CanvasInsertImageOptions): void;
   /** Muda o modo de exibição da imagem clicada: em linha, bloco (acima/abaixo) ou contorno. */
-  setImageDisplay(display: ImageDisplay): void;
+  setImageDisplay(display: ImageDisplay, wrapSettings?: Partial<CanvasImageWrapSettings>): void;
+  /** Ajusta lado/tipo/distância do contorno da imagem selecionada. */
+  setImageWrapSettings(settings: Partial<CanvasImageWrapSettings>): void;
   /** Há uma imagem selecionada/clicada agora? */
   hasSelectedImage(): boolean;
   insertHyperlink(url: string): void;
@@ -163,7 +202,82 @@ interface CanvasEditorHostProps {
   /** Notifica a escala do editor (1 = 100%) ao mudar (botões ou ctrl+roda). */
   onPageScaleChange?: (scale: number) => void;
   /** Notifica quando uma imagem é clicada/selecionada (com a posição do clique). */
-  onImageSelected?: (info: { x: number; y: number } | null) => void;
+  onImageSelected?: (info: CanvasImageSelectionInfo | null) => void;
+}
+
+const DEFAULT_IMAGE_WRAP_PADDING_MM = 3;
+
+function roundMm(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function getImageIndex(draw: CanvasDrawInternal | null, element: IElement): number {
+  const elementList = draw?.getOriginalMainElementList?.();
+  return Array.isArray(elementList) ? elementList.indexOf(element) : -1;
+}
+
+function canUsePngAlpha(imageWrap: PreloImageWrapExtension | undefined): boolean {
+  return imageWrap?.pngAlphaContour?.hasTransparency === true;
+}
+
+function ensureImageWrapExtension(element: PreloImageElement): PreloImageWrapExtension {
+  const existing = element.extension?.preloImageWrap;
+  if (existing) {
+    existing.side ??= 'largest';
+    existing.shape ??= existing.mode === 'png-shape' ? 'png-alpha' : 'box';
+    existing.paddingPx ??= mmToPx(DEFAULT_IMAGE_WRAP_PADDING_MM);
+    existing.paddingMm ??= roundMm(pxToMm(existing.paddingPx));
+    return existing;
+  }
+
+  const imageWrap = createPreloImageWrapExtension(null);
+  imageWrap.paddingMm = DEFAULT_IMAGE_WRAP_PADDING_MM;
+  imageWrap.paddingPx = mmToPx(DEFAULT_IMAGE_WRAP_PADDING_MM);
+  element.extension = { ...(element.extension ?? {}), preloImageWrap: imageWrap };
+  return imageWrap;
+}
+
+function getImageWrapSettings(element: PreloImageElement): CanvasImageWrapSettings {
+  const imageWrap = element.extension?.preloImageWrap;
+  const hasPngAlpha = canUsePngAlpha(imageWrap);
+  const shape = imageWrap?.shape ?? (imageWrap?.mode === 'png-shape' ? 'png-alpha' : 'box');
+  return {
+    side: imageWrap?.side ?? 'largest',
+    shape: shape === 'png-alpha' && hasPngAlpha ? 'png-alpha' : 'box',
+    paddingMm: roundMm(imageWrap?.paddingMm ?? pxToMm(imageWrap?.paddingPx ?? mmToPx(DEFAULT_IMAGE_WRAP_PADDING_MM))),
+  };
+}
+
+function applyImageWrapSettings(
+  element: PreloImageElement,
+  settings: Partial<CanvasImageWrapSettings> = {}
+): CanvasImageWrapSettings {
+  const imageWrap = ensureImageWrapExtension(element);
+  const current = getImageWrapSettings(element);
+  const nextShape = settings.shape ?? current.shape;
+  const shape = nextShape === 'png-alpha' && canUsePngAlpha(imageWrap) ? 'png-alpha' : 'box';
+
+  imageWrap.side = settings.side ?? current.side;
+  imageWrap.shape = shape;
+  imageWrap.mode = shape === 'png-alpha' ? 'png-shape' : 'box';
+  imageWrap.paddingMm = Math.max(0, settings.paddingMm ?? current.paddingMm);
+  imageWrap.paddingPx = mmToPx(imageWrap.paddingMm);
+
+  return getImageWrapSettings(element);
+}
+
+function getImageSelectionInfo(
+  element: PreloImageElement,
+  point: { x: number; y: number }
+): CanvasImageSelectionInfo {
+  const imageWrap = element.extension?.preloImageWrap;
+  return {
+    x: point.x,
+    y: point.y,
+    display: element.imgDisplay ?? ImageDisplay.INLINE,
+    wrap: getImageWrapSettings(element),
+    hasPngAlphaContour: canUsePngAlpha(imageWrap),
+  };
 }
 
 export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostProps>(
@@ -278,6 +392,35 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
           console.warn('Justificação por espaços desligada nesta sessão após erro:', error);
         }
       }
+      // Colar texto de fora (PDF/Word/txt) reflui para o corpo justificado: junta
+      // as quebras de linha duras em parágrafos de verdade — senão cada linha vira
+      // "fim de parágrafo" e não justifica nem aplicando "Justificar".
+      let uninstallPasteReflow: () => void = () => undefined;
+      try {
+        uninstallPasteReflow = installCanvasPasteReflow(
+          editor as unknown as {
+            override: { paste?: (evt?: ClipboardEvent) => unknown };
+            command: { executeInsertElementList: (list: IElement[]) => void };
+          },
+          () => {
+            const editorOptions = draw?.getOptions() as
+              | { defaultFont?: string; defaultSize?: number }
+              | undefined;
+            const body = getPreloParagraphStyleCanvasMapping('body');
+            const size = body.fontSize ?? editorOptions?.defaultSize ?? 13;
+            return {
+              font: editorOptions?.defaultFont ?? 'Crimson Text',
+              size,
+              rowFlex: RowFlex.ALIGNMENT,
+              rowMargin: body.baselineGrid
+                ? computeBaselineGridRowMargin(size)
+                : body.rowMargin,
+            };
+          }
+        );
+      } catch (error) {
+        console.warn('Reflow de colagem desligado nesta sessão após erro:', error);
+      }
       editor.listener.contentChange = () => {
         // Ignora mudanças induzidas por rotinas internas; edição do usuário fica leve.
         if (hyphenatingRef.current) return;
@@ -291,10 +434,11 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       // Clique numa imagem: guarda o elemento (alvo do contorno) e avisa o shell
       // com a posição do clique (para a barrinha flutuante de opções da imagem).
       editor.eventBus.on('imageMousedown', (payload) => {
-        selectedImageRef.current = payload.element ?? null;
+        const element = (payload.element ?? null) as PreloImageElement | null;
+        selectedImageRef.current = element;
         const evt = payload.evt as MouseEvent | undefined;
         notifyImageSelectedRef.current?.(
-          evt ? { x: evt.clientX, y: evt.clientY } : { x: 0, y: 0 }
+          element ? getImageSelectionInfo(element, evt ? { x: evt.clientX, y: evt.clientY } : { x: 0, y: 0 }) : null
         );
       });
       notifyIndentActive(); // estado inicial
@@ -312,6 +456,7 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
 
       return () => {
         container.removeEventListener('keydown', handleParagraphEnterKeyDown, true);
+        uninstallPasteReflow();
         uninstallWordJustification();
         editor.destroy();
         editorRef.current = null;
@@ -436,15 +581,48 @@ export const CanvasEditorHost = forwardRef<CanvasEditorHandle, CanvasEditorHostP
       insertTable(rows: number, cols: number) {
         requireEditor(editorRef.current).command.executeInsertTable(rows, cols);
       },
-      insertImage(base64: string, width: number, height: number) {
-        requireEditor(editorRef.current).command.executeImage({ value: base64, width, height });
+      insertImage(base64: string, width: number, height: number, options?: CanvasInsertImageOptions) {
+        let extension: PreloImageElementExtension | undefined;
+        if (options?.pngAlphaContour) {
+          const preloImageWrap = createPreloImageWrapExtension(options.pngAlphaContour);
+          preloImageWrap.paddingMm = DEFAULT_IMAGE_WRAP_PADDING_MM;
+          preloImageWrap.paddingPx = mmToPx(DEFAULT_IMAGE_WRAP_PADDING_MM);
+          extension = { preloImageWrap };
+        }
+        requireEditor(editorRef.current).command.executeImage({ value: base64, width, height, extension });
       },
-      setImageDisplay(display: ImageDisplay) {
-        const element = selectedImageRef.current;
+      setImageDisplay(display: ImageDisplay, wrapSettings?: Partial<CanvasImageWrapSettings>) {
+        const element = selectedImageRef.current as PreloImageElement | null;
         if (!element) return;
-        // executeChangeImageDisplay usa o range atual (que está na imagem clicada)
-        // para ancorar o contorno. Isso reflua o texto ao redor — nativo do motor.
-        requireEditor(editorRef.current).command.executeChangeImageDisplay(element, display);
+        const editor = requireEditor(editorRef.current);
+        const draw = drawRef.current;
+        const imageIndex = getImageIndex(draw, element);
+        if (imageIndex >= 0) {
+          editor.command.executeSetRange(imageIndex, imageIndex);
+        }
+        if (display === ImageDisplay.SURROUND) {
+          applyImageWrapSettings(element, wrapSettings);
+        }
+        editor.command.executeChangeImageDisplay(element, display);
+        if (element.imgDisplay === display) {
+          draw?.render({ isCompute: true, isSetCursor: false });
+        }
+      },
+      setImageWrapSettings(settings: Partial<CanvasImageWrapSettings>) {
+        const element = selectedImageRef.current as PreloImageElement | null;
+        if (!element) return;
+        const editor = requireEditor(editorRef.current);
+        const draw = drawRef.current;
+        const imageIndex = getImageIndex(draw, element);
+        if (imageIndex >= 0) {
+          editor.command.executeSetRange(imageIndex, imageIndex);
+        }
+        applyImageWrapSettings(element, settings);
+        if (element.imgDisplay !== ImageDisplay.SURROUND) {
+          editor.command.executeChangeImageDisplay(element, ImageDisplay.SURROUND);
+        } else {
+          draw?.render({ isCompute: true, isSetCursor: false });
+        }
       },
       hasSelectedImage() {
         return selectedImageRef.current !== null;

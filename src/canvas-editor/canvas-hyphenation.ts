@@ -20,15 +20,15 @@
 import Hypher from 'hypher';
 import pt from 'hyphenation.pt';
 import type { CanvasDrawInternal } from './canvas-draw-internal';
+import {
+  PRELO_BOOK_TYPOGRAPHY_PROFILE,
+  type CanvasHyphenationProfile,
+} from './canvas-typography-profile';
 
 export const AUTO_HYPHEN_VALUE = '-';
 
 /** Letras (inclui acentos PT) para caminhar palavras. */
 const PT_LETTER = /[A-Za-zªºÀ-ÖØ-öø-ÿ]/;
-/** Largura mínima de palavra para hifenizar (evita quebrar palavras curtas). */
-const MIN_WORD_LEN = 5;
-/** Máximo de linhas hifenadas consecutivas (regra tipográfica). */
-const MAX_CONSECUTIVE = 2;
 /** Trava dura contra loop (muito acima de qualquer página real). */
 const HARD_SAFETY = 2000;
 
@@ -115,15 +115,21 @@ function makeHyphen(neighbor: RawElement | undefined): RawElement {
   return el;
 }
 
-/** Offsets de quebra de sílaba (cumulativos), excluindo 0 e o fim. */
-function syllableOffsets(word: string): number[] {
+/** Offsets de quebra de sílaba (cumulativos), filtrados pelo perfil editorial. */
+export function candidateHyphenOffsets(
+  word: string,
+  profile: CanvasHyphenationProfile = PRELO_BOOK_TYPOGRAPHY_PROFILE.hyphenation
+): number[] {
+  if (word.length < profile.minWordLength) return [];
   const parts = getHyphenator().hyphenate(word);
   if (parts.length < 2) return [];
   const offsets: number[] = [];
   let acc = 0;
   for (let i = 0; i < parts.length - 1; i++) {
     acc += parts[i]!.length;
-    offsets.push(acc);
+    if (acc >= profile.minPrefixLength && word.length - acc >= profile.minSuffixLength) {
+      offsets.push(acc);
+    }
   }
   return offsets;
 }
@@ -143,7 +149,10 @@ function renderReflow(draw: CanvasDrawInternal): void {
  * Pré-condição do chamador: deve estar protegido por flag de re-entrância e
  * try/catch (ver CanvasEditorHost). NÃO faz nada se houver seleção real ativa.
  */
-export function applyHyphenation(draw: CanvasDrawInternal): number {
+export function applyHyphenation(
+  draw: CanvasDrawInternal,
+  profile: CanvasHyphenationProfile = PRELO_BOOK_TYPOGRAPHY_PROFILE.hyphenation
+): number {
   const range = typeof draw.getRange === 'function' ? draw.getRange() : null;
   const liveRange = range ? range.getRange() : null;
   const start = liveRange ? liveRange.startIndex : -1;
@@ -184,7 +193,7 @@ export function applyHyphenation(draw: CanvasDrawInternal): number {
     // limite de linhas hifenadas consecutivas
     let consec = 0;
     for (let k = i - 1; k >= 0 && isAutoHyphen(lastVisible(rows[k]!)); k--) consec += 1;
-    if (consec >= MAX_CONSECUTIVE) {
+    if (consec >= profile.maxConsecutiveLines) {
       i += 1;
       continue;
     }
@@ -199,12 +208,12 @@ export function applyHyphenation(draw: CanvasDrawInternal): number {
       e += 1;
     }
     const word = list.slice(s, e).map((el) => el.value).join('');
-    if (word.length < MIN_WORD_LEN || hasInnerHyphen) {
+    if (hasInnerHyphen) {
       i += 1;
       continue;
     }
 
-    const offsets = syllableOffsets(word);
+    const offsets = candidateHyphenOffsets(word, profile);
     if (offsets.length === 0) {
       i += 1;
       continue;
